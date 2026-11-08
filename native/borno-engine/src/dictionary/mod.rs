@@ -566,24 +566,47 @@ pub fn get_suggestions(input: &str, lang_or_layout: &str, max_results: usize) ->
         if words.len() < max_results {
             if let Some(folding) = crate::gesture::decoder::get_char_folding(lang_or_layout) {
                 let folded_candidates = expand_char_folded_variants(input, &folding, 32);
-                for cand in folded_candidates {
-                    if cand != input {
-                        if dict.contains_word(&cand) && !words.contains(&cand) {
-                            words.push(cand.clone());
+
+                // Phase 1 (Gboard/AOSP style): Exact-length word matches (e.g. nasilsin -> nasılsın, cig -> çiğ)
+                // These are direct diacritic equivalents of the typed word and should be prioritized by frequency.
+                let mut exact_matches: Vec<(String, u8)> = Vec::new();
+                for cand in &folded_candidates {
+                    if cand != input && cand.chars().count() == input.chars().count() {
+                        if dict.contains_word(cand) && !words.contains(cand) {
+                            let freq = dict.word_freq(cand);
+                            exact_matches.push((cand.clone(), freq));
+                        }
+                    }
+                }
+                // Sort direct diacritic matches by unigram frequency descending
+                exact_matches.sort_by(|a, b| b.1.cmp(&a.1));
+
+                // Insert the top direct diacritic matches at position 0 (or right after exact typed word if it exists)
+                let insert_pos = if dict.contains_word(input) && !words.is_empty() { 1 } else { 0 };
+                for (matched_word, _) in exact_matches {
+                    if !words.contains(&matched_word) {
+                        words.insert(insert_pos.min(words.len()), matched_word);
+                        if words.len() >= max_results {
+                            break;
+                        }
+                    }
+                }
+
+                // Phase 2: If room still remains, allow prefix completions of folded stems
+                if words.len() < max_results {
+                    for cand in folded_candidates {
+                        if cand != input {
+                            for sug in dict.suggest(&cand, max_results, prox) {
+                                if !words.contains(&sug) {
+                                    words.push(sug);
+                                    if words.len() >= max_results {
+                                        break;
+                                    }
+                                }
+                            }
                             if words.len() >= max_results {
                                 break;
                             }
-                        }
-                        for sug in dict.suggest(&cand, max_results, prox) {
-                            if !words.contains(&sug) {
-                                words.push(sug);
-                                if words.len() >= max_results {
-                                    break;
-                                }
-                            }
-                        }
-                        if words.len() >= max_results {
-                            break;
                         }
                     }
                 }
