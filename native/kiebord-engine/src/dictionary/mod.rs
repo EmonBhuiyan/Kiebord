@@ -557,6 +557,34 @@ pub fn get_suggestions(input: &str, lang_or_layout: &str, max_results: usize) ->
             }
         }
 
+        // Diacritic & char folding suggestions for extension language packs (e.g. Turkish nasilsin -> nasılsın, cig -> çiğ)
+        if words.len() < max_results {
+            if let Some(folding) = crate::gesture::decoder::get_char_folding(lang_or_layout) {
+                let folded_candidates = expand_char_folded_variants(input, &folding, 32);
+                for cand in folded_candidates {
+                    if cand != input {
+                        if dict.contains_word(&cand) && !words.contains(&cand) {
+                            words.push(cand.clone());
+                            if words.len() >= max_results {
+                                break;
+                            }
+                        }
+                        for sug in dict.suggest(&cand, max_results, prox) {
+                            if !words.contains(&sug) {
+                                words.push(sug);
+                                if words.len() >= max_results {
+                                    break;
+                                }
+                            }
+                        }
+                        if words.len() >= max_results {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         // Strict language separation: purge cross-language words
         if is_bn {
             words.retain(|w| !w.chars().any(|c| c.is_ascii_alphabetic()));
@@ -568,6 +596,65 @@ pub fn get_suggestions(input: &str, lang_or_layout: &str, max_results: usize) ->
     } else {
         String::new()
     }
+}
+
+/// Expands an input prefix into candidate diacritic/folded variations using the registered CharFolding rules.
+fn expand_char_folded_variants(
+    input: &str,
+    folding: &crate::gesture::decoder::CharFolding,
+    max_variants: usize,
+) -> Vec<String> {
+    use std::collections::{HashMap, HashSet};
+
+    // Map base characters to their accented or confused counterparts (e.g. 'c' -> {'ç'}, 'i' -> {'ı'})
+    let mut reverse_map: HashMap<char, HashSet<char>> = HashMap::new();
+    for (&accented, &base) in &folding.fold_to_base {
+        let b = base.to_ascii_lowercase();
+        let a = accented.to_lowercase().next().unwrap_or(accented);
+        reverse_map.entry(b).or_default().insert(a);
+    }
+    for group in &folding.confusion_groups {
+        for &c1 in group {
+            let l1 = c1.to_lowercase().next().unwrap_or(c1);
+            for &c2 in group {
+                let l2 = c2.to_lowercase().next().unwrap_or(c2);
+                if l1 != l2 {
+                    reverse_map.entry(l1).or_default().insert(l2);
+                }
+            }
+        }
+    }
+
+    let mut variants = vec![String::new()];
+    for ch in input.chars() {
+        let lc = ch.to_lowercase().next().unwrap_or(ch);
+        let mut char_options = vec![ch];
+        if let Some(equivs) = reverse_map.get(&lc) {
+            for &eq in equivs {
+                if eq != ch && !char_options.contains(&eq) {
+                    char_options.push(eq);
+                }
+            }
+        }
+
+        let mut next_variants = Vec::new();
+        for prefix in &variants {
+            for &opt in &char_options {
+                let mut candidate = prefix.clone();
+                candidate.push(opt);
+                next_variants.push(candidate);
+                if next_variants.len() >= max_variants {
+                    break;
+                }
+            }
+            if next_variants.len() >= max_variants {
+                break;
+            }
+        }
+        variants = next_variants;
+    }
+
+    variants
 }
 
 /// Checks whether `word` exists as an exact terminal word in the specified dictionary.
@@ -922,6 +1009,12 @@ fn test_iphone_casing() {
         let sugs = get_suggestions("merh", "test_lang", 5);
         assert!(sugs.contains("merhaba"), "Suggestions were: {}", sugs);
         assert!(is_word("merhaba", "test_lang"));
+
+        // Test char folding in suggestions (e.g. typing "dunya" with ASCII 'u' suggests "dünya")
+        let folding_json = r#"{"version":1,"fold_to_base":{"ü":"u"}}"#;
+        assert!(crate::gesture::decoder::register_char_folding_json("test_lang", folding_json));
+        let folded_sugs = get_suggestions("dunya", "test_lang", 5);
+        assert!(folded_sugs.contains("dünya"), "Folded suggestions were: {}", folded_sugs);
 
         let _ = std::fs::remove_file(dict_path);
     }
