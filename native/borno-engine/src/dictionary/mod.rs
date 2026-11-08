@@ -562,7 +562,9 @@ pub fn get_suggestions(input: &str, lang_or_layout: &str, max_results: usize) ->
             }
         }
 
-        // Diacritic & char folding suggestions for extension language packs (configured via pack's char_folding.json)
+        // Generic diacritic matching and stem completions for any extension language pack
+        // that defines character folding (e.g. Turkish, German, French, Spanish, Vietnamese).
+        // Evaluates rules dynamically from the pack's registered char_folding.json with zero hardcoding.
         if let Some(folding) = crate::gesture::decoder::get_char_folding(lang_or_layout) {
             let folded_candidates = expand_char_folded_variants(input, &folding, 32);
 
@@ -645,6 +647,7 @@ pub fn get_suggestions(input: &str, lang_or_layout: &str, max_results: usize) ->
 }
 
 /// Expands an input prefix into candidate diacritic/folded variations using the registered CharFolding rules.
+/// Applies generically across any extension pack defining fold_to_base or confusion_groups (e.g. Turkish, German, Spanish).
 fn expand_char_folded_variants(
     input: &str,
     folding: &crate::gesture::decoder::CharFolding,
@@ -652,7 +655,7 @@ fn expand_char_folded_variants(
 ) -> Vec<String> {
     use std::collections::{HashMap, HashSet};
 
-    // Map base characters to their accented or confused counterparts (e.g. 'c' -> {'ç'}, 'i' -> {'ı'})
+    // Map base characters to their accented or confusable counterparts defined by the pack
     let mut reverse_map: HashMap<char, HashSet<char>> = HashMap::new();
     for (&accented, &base) in &folding.fold_to_base {
         let b = base.to_ascii_lowercase();
@@ -724,6 +727,8 @@ pub fn predict_next_words(prev_word: &str, lang_or_layout: &str, max_results: us
 
     if let Some(dict) = dict_opt {
         let mut words = dict.predict_next(prev_word, max_results);
+        // Next-word prediction fallback for extension packs defining character folding (e.g. Turkish, German, Spanish):
+        // If no direct bigrams are found, check folded variants of the previous word (e.g. if entered without accents).
         if words.is_empty() {
             if let Some(folding) = crate::gesture::decoder::get_char_folding(lang_or_layout) {
                 let variants = expand_char_folded_variants(prev_word, &folding, 16);
