@@ -562,51 +562,69 @@ pub fn get_suggestions(input: &str, lang_or_layout: &str, max_results: usize) ->
             }
         }
 
-        // Diacritic & char folding suggestions for extension language packs (e.g. Turkish nasilsin -> nasılsın, cig -> çiğ)
-        if words.len() < max_results {
-            if let Some(folding) = crate::gesture::decoder::get_char_folding(lang_or_layout) {
-                let folded_candidates = expand_char_folded_variants(input, &folding, 32);
+        // Diacritic & char folding suggestions for extension language packs (configured via pack's char_folding.json)
+        if let Some(folding) = crate::gesture::decoder::get_char_folding(lang_or_layout) {
+            let folded_candidates = expand_char_folded_variants(input, &folding, 32);
 
-                // Phase 1 (Gboard/AOSP style): Exact-length word matches (e.g. nasilsin -> nasılsın, cig -> çiğ)
-                // These are direct diacritic equivalents of the typed word and should be prioritized by frequency.
-                let mut exact_matches: Vec<(String, u8)> = Vec::new();
-                for cand in &folded_candidates {
-                    if cand != input && cand.chars().count() == input.chars().count() {
-                        if dict.contains_word(cand) && !words.contains(cand) {
-                            let freq = dict.word_freq(cand);
-                            exact_matches.push((cand.clone(), freq));
+            // Phase 1 (Gboard/AOSP style): Exact-length word matches
+            // Direct diacritic equivalents of the typed word prioritized by frequency.
+            let mut exact_matches: Vec<(String, u8)> = Vec::new();
+            for cand in &folded_candidates {
+                if cand != input && cand.chars().count() == input.chars().count() {
+                    if dict.contains_word(cand) {
+                        let freq = dict.word_freq(cand);
+                        exact_matches.push((cand.clone(), freq));
+                    }
+                }
+            }
+            exact_matches.sort_by(|a, b| b.1.cmp(&a.1));
+
+            let input_is_word = dict.contains_word(input);
+            let input_freq = if input_is_word { dict.word_freq(input) } else { 0 };
+
+            for (matched_word, freq) in exact_matches {
+                words.retain(|w| w != &matched_word);
+                let insert_pos = if !input_is_word || freq > input_freq {
+                    0
+                } else if !words.is_empty() {
+                    1
+                } else {
+                    0
+                };
+                words.insert(insert_pos.min(words.len()), matched_word);
+                if words.len() > max_results {
+                    words.truncate(max_results);
+                }
+            }
+
+            // Phase 2 (Typing in the middle / stem completion for multi-character words):
+            // If the typed input has folded stems present in the trie, fetch prefix completions for valid stems.
+            let mut valid_stems: Vec<(String, u8)> = Vec::new();
+            for cand in &folded_candidates {
+                if cand != input {
+                    if let Some(node) = dict.find_node(cand) {
+                        let max_sub = dict.max_subtree_freq(node);
+                        if max_sub > 0 {
+                            valid_stems.push((cand.clone(), max_sub));
                         }
                     }
                 }
-                // Sort direct diacritic matches by unigram frequency descending
-                exact_matches.sort_by(|a, b| b.1.cmp(&a.1));
+            }
+            valid_stems.sort_by(|a, b| b.1.cmp(&a.1));
 
-                // Insert the top direct diacritic matches at position 0 (or right after exact typed word if it exists)
-                let insert_pos = if dict.contains_word(input) && !words.is_empty() { 1 } else { 0 };
-                for (matched_word, _) in exact_matches {
-                    if !words.contains(&matched_word) {
-                        words.insert(insert_pos.min(words.len()), matched_word);
-                        if words.len() >= max_results {
-                            break;
+            for (stem, _) in valid_stems.into_iter().take(3) {
+                let completions = dict.suggest(&stem, max_results, prox);
+                for sug in completions {
+                    if !words.contains(&sug) {
+                        if !input_is_word {
+                            // When typed input is not an exact word, insert completions before typos
+                            let pos = words.iter().position(|w| !w.starts_with(&stem)).unwrap_or(words.len());
+                            words.insert(pos.min(words.len()), sug);
+                        } else {
+                            words.push(sug);
                         }
-                    }
-                }
-
-                // Phase 2: If room still remains, allow prefix completions of folded stems
-                if words.len() < max_results {
-                    for cand in folded_candidates {
-                        if cand != input {
-                            for sug in dict.suggest(&cand, max_results, prox) {
-                                if !words.contains(&sug) {
-                                    words.push(sug);
-                                    if words.len() >= max_results {
-                                        break;
-                                    }
-                                }
-                            }
-                            if words.len() >= max_results {
-                                break;
-                            }
+                        if words.len() > max_results {
+                            words.truncate(max_results);
                         }
                     }
                 }
@@ -706,6 +724,20 @@ pub fn predict_next_words(prev_word: &str, lang_or_layout: &str, max_results: us
 
     if let Some(dict) = dict_opt {
         let mut words = dict.predict_next(prev_word, max_results);
+        if words.is_empty() {
+            if let Some(folding) = crate::gesture::decoder::get_char_folding(lang_or_layout) {
+                let variants = expand_char_folded_variants(prev_word, &folding, 16);
+                for v in variants {
+                    if v != prev_word {
+                        let nexts = dict.predict_next(&v, max_results);
+                        if !nexts.is_empty() {
+                            words = nexts;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         if is_bn {
             words.retain(|w| !w.chars().any(|c| c.is_ascii_alphabetic()));
         } else {
@@ -1022,7 +1054,7 @@ fn test_iphone_casing() {
 
     #[test]
     fn test_dynamic_dictionary_registry() {
-        let sample = "name=Test Dynamic Dict;author=Tester;version=1;date=123456789;license=MIT;\nword=merhaba,f=200\nword=dünya,f=180\n";
+        let sample = "name=Test Dynamic Dict;author=Emon Bhuiyan;version=1;date=123456789;license=MIT;\nword=merhaba,f=200\nword=dünya,f=180\nword=çiğ,f=111\nword=gün,f=161\nword=öğrenci,f=145\nword=öğrenciler,f=130\nword=teşekkür,f=115\n  bigram=ederim,f=140\n  prev_word[0]=teşekkür\nword=ederim,f=140\n";
         let parsed = CombinedParser::parse_str(sample);
         let bytes = BinaryDict::compile_combined(&parsed);
         let temp_dir = std::env::temp_dir();
@@ -1033,16 +1065,44 @@ fn test_iphone_casing() {
         let dict = get_binary_dict("test_lang").expect("test_lang dict found");
         assert!(dict.contains_word("merhaba"));
         assert!(dict.contains_word("dünya"));
+        assert!(dict.contains_word("çiğ"));
+        assert!(dict.contains_word("gün"));
+        assert!(dict.contains_word("öğrenci"));
 
         let sugs = get_suggestions("merh", "test_lang", 5);
         assert!(sugs.contains("merhaba"), "Suggestions were: {}", sugs);
         assert!(is_word("merhaba", "test_lang"));
 
-        // Test char folding in suggestions (e.g. typing "dunya" with ASCII 'u' suggests "dünya")
-        let folding_json = r#"{"version":1,"fold_to_base":{"ü":"u"}}"#;
+        // Register Turkish-like folding rules
+        let folding_json = r#"{
+            "version": 1,
+            "fold_to_base": {
+                "ğ": "g", "ü": "u", "ş": "s", "ö": "o", "ç": "c", "i": "ı"
+            },
+            "confusion_groups": [["i", "ı"]]
+        }"#;
         assert!(crate::gesture::decoder::register_char_folding_json("test_lang", folding_json));
+
+        // Test 1: Direct folded suggestions (e.g. typing "dunya" with ASCII suggests "dünya")
         let folded_sugs = get_suggestions("dunya", "test_lang", 5);
         assert!(folded_sugs.contains("dünya"), "Folded suggestions were: {}", folded_sugs);
+
+        // Test 2: Short words (cig -> çiğ, gun -> gün) must be at index 0
+        let cig_sugs = get_suggestions("cig", "test_lang", 5);
+        let cig_first = cig_sugs.split('|').next().unwrap_or("");
+        assert_eq!(cig_first, "çiğ", "Expected 'çiğ' at top of suggestions for 'cig', got: {}", cig_sugs);
+
+        let gun_sugs = get_suggestions("gun", "test_lang", 5);
+        let gun_first = gun_sugs.split('|').next().unwrap_or("");
+        assert_eq!(gun_first, "gün", "Expected 'gün' at top of suggestions for 'gun', got: {}", gun_sugs);
+
+        // Test 3: Typing in the middle of hard words (stem prefix completions: ogrenc -> öğrenci)
+        let mid_sugs = get_suggestions("ogrenc", "test_lang", 5);
+        assert!(mid_sugs.contains("öğrenci"), "Expected 'öğrenci' for prefix 'ogrenc', got: {}", mid_sugs);
+
+        // Test 4: Next-word prediction with char-folded preceding word (tesekkur -> ederim)
+        let next_words = predict_next_words("tesekkur", "test_lang", 3);
+        assert!(next_words.contains("ederim"), "Expected 'ederim' following 'tesekkur', got: {}", next_words);
 
         let _ = std::fs::remove_file(dict_path);
     }
