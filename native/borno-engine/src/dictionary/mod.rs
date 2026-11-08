@@ -1052,9 +1052,61 @@ fn test_iphone_casing() {
         assert!(en_meta_str.contains("license=Only for Kiebord;"), "en meta: {}", en_meta_str);
     }
 
+    /// Tests generic diacritic matching and stem completions for any extension language pack
+    /// that defines character folding (e.g. Turkish, German, French, Spanish, Vietnamese).
+    #[test]
+    fn test_extension_pack_char_folding_and_stem_completions() {
+        let sample = "name=Test Folding Dict;author=Emon Bhuiyan;version=1;date=123456789;license=MIT;\nword=dünya,f=180\nword=çiğ,f=111\nword=gün,f=161\nword=öğrenci,f=145\nword=öğrenciler,f=130\nword=teşekkür,f=115\n  bigram=ederim,f=140\n  prev_word[0]=teşekkür\nword=ederim,f=140\n";
+        let parsed = CombinedParser::parse_str(sample);
+        let bytes = BinaryDict::compile_combined(&parsed);
+        let temp_dir = std::env::temp_dir();
+        let dict_path = temp_dir.join("test_folding.dict");
+        std::fs::write(&dict_path, &bytes).expect("write temp dict");
+
+        assert!(load_dictionary_path("test_folding_lang", &dict_path));
+        let dict = get_binary_dict("test_folding_lang").expect("test_folding_lang dict found");
+        assert!(dict.contains_word("dünya"));
+        assert!(dict.contains_word("çiğ"));
+        assert!(dict.contains_word("gün"));
+        assert!(dict.contains_word("öğrenci"));
+
+        // Register dynamic char-folding rules (universal for any extension pack defining fold_to_base / confusion_groups)
+        let folding_json = r#"{
+            "version": 1,
+            "fold_to_base": {
+                "ğ": "g", "ü": "u", "ş": "s", "ö": "o", "ç": "c", "i": "ı"
+            },
+            "confusion_groups": [["i", "ı"]]
+        }"#;
+        assert!(crate::gesture::decoder::register_char_folding_json("test_folding_lang", folding_json));
+
+        // Test 1: Direct folded suggestions (e.g. typing "dunya" with ASCII suggests "dünya")
+        let folded_sugs = get_suggestions("dunya", "test_folding_lang", 5);
+        assert!(folded_sugs.contains("dünya"), "Folded suggestions were: {}", folded_sugs);
+
+        // Test 2: Short words (cig -> çiğ, gun -> gün) must be at index 0
+        let cig_sugs = get_suggestions("cig", "test_folding_lang", 5);
+        let cig_first = cig_sugs.split('|').next().unwrap_or("");
+        assert_eq!(cig_first, "çiğ", "Expected 'çiğ' at top of suggestions for 'cig', got: {}", cig_sugs);
+
+        let gun_sugs = get_suggestions("gun", "test_folding_lang", 5);
+        let gun_first = gun_sugs.split('|').next().unwrap_or("");
+        assert_eq!(gun_first, "gün", "Expected 'gün' at top of suggestions for 'gun', got: {}", gun_sugs);
+
+        // Test 3: Typing in the middle of hard words (stem prefix completions: ogrenc -> öğrenci)
+        let mid_sugs = get_suggestions("ogrenc", "test_folding_lang", 5);
+        assert!(mid_sugs.contains("öğrenci"), "Expected 'öğrenci' for prefix 'ogrenc', got: {}", mid_sugs);
+
+        // Test 4: Next-word prediction with char-folded preceding word (tesekkur -> ederim)
+        let next_words = predict_next_words("tesekkur", "test_folding_lang", 3);
+        assert!(next_words.contains("ederim"), "Expected 'ederim' following 'tesekkur', got: {}", next_words);
+
+        let _ = std::fs::remove_file(dict_path);
+    }
+
     #[test]
     fn test_dynamic_dictionary_registry() {
-        let sample = "name=Test Dynamic Dict;author=Emon Bhuiyan;version=1;date=123456789;license=MIT;\nword=merhaba,f=200\nword=dünya,f=180\nword=çiğ,f=111\nword=gün,f=161\nword=öğrenci,f=145\nword=öğrenciler,f=130\nword=teşekkür,f=115\n  bigram=ederim,f=140\n  prev_word[0]=teşekkür\nword=ederim,f=140\n";
+        let sample = "name=Test Dynamic Dict;author=Tester;version=1;date=123456789;license=MIT;\nword=merhaba,f=200\nword=dünya,f=180\n";
         let parsed = CombinedParser::parse_str(sample);
         let bytes = BinaryDict::compile_combined(&parsed);
         let temp_dir = std::env::temp_dir();
@@ -1065,44 +1117,10 @@ fn test_iphone_casing() {
         let dict = get_binary_dict("test_lang").expect("test_lang dict found");
         assert!(dict.contains_word("merhaba"));
         assert!(dict.contains_word("dünya"));
-        assert!(dict.contains_word("çiğ"));
-        assert!(dict.contains_word("gün"));
-        assert!(dict.contains_word("öğrenci"));
 
         let sugs = get_suggestions("merh", "test_lang", 5);
         assert!(sugs.contains("merhaba"), "Suggestions were: {}", sugs);
         assert!(is_word("merhaba", "test_lang"));
-
-        // Register Turkish-like folding rules
-        let folding_json = r#"{
-            "version": 1,
-            "fold_to_base": {
-                "ğ": "g", "ü": "u", "ş": "s", "ö": "o", "ç": "c", "i": "ı"
-            },
-            "confusion_groups": [["i", "ı"]]
-        }"#;
-        assert!(crate::gesture::decoder::register_char_folding_json("test_lang", folding_json));
-
-        // Test 1: Direct folded suggestions (e.g. typing "dunya" with ASCII suggests "dünya")
-        let folded_sugs = get_suggestions("dunya", "test_lang", 5);
-        assert!(folded_sugs.contains("dünya"), "Folded suggestions were: {}", folded_sugs);
-
-        // Test 2: Short words (cig -> çiğ, gun -> gün) must be at index 0
-        let cig_sugs = get_suggestions("cig", "test_lang", 5);
-        let cig_first = cig_sugs.split('|').next().unwrap_or("");
-        assert_eq!(cig_first, "çiğ", "Expected 'çiğ' at top of suggestions for 'cig', got: {}", cig_sugs);
-
-        let gun_sugs = get_suggestions("gun", "test_lang", 5);
-        let gun_first = gun_sugs.split('|').next().unwrap_or("");
-        assert_eq!(gun_first, "gün", "Expected 'gün' at top of suggestions for 'gun', got: {}", gun_sugs);
-
-        // Test 3: Typing in the middle of hard words (stem prefix completions: ogrenc -> öğrenci)
-        let mid_sugs = get_suggestions("ogrenc", "test_lang", 5);
-        assert!(mid_sugs.contains("öğrenci"), "Expected 'öğrenci' for prefix 'ogrenc', got: {}", mid_sugs);
-
-        // Test 4: Next-word prediction with char-folded preceding word (tesekkur -> ederim)
-        let next_words = predict_next_words("tesekkur", "test_lang", 3);
-        assert!(next_words.contains("ederim"), "Expected 'ederim' following 'tesekkur', got: {}", next_words);
 
         let _ = std::fs::remove_file(dict_path);
     }
