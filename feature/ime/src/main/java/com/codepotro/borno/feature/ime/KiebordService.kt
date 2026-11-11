@@ -1019,9 +1019,15 @@ class KiebordService : InputMethodService() {
         updateSuggestions()
     }
 
+    private fun getMainActivityClass(): Class<*> {
+        return runCatching {
+            Class.forName("${packageName}.MainActivity")
+        }.getOrNull() ?: Class.forName("com.codepotro.borno.kiebord.MainActivity")
+    }
+
     fun openLanguagesSettings() {
         try {
-            val intent = Intent(this, Class.forName("com.codepotro.borno.kiebord.MainActivity")).apply {
+            val intent = Intent(this, getMainActivityClass()).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra("navigate_to", "layouts")
             }
@@ -1031,7 +1037,7 @@ class KiebordService : InputMethodService() {
 
     fun openThemeSettings() {
         try {
-            val intent = Intent(this, Class.forName("com.codepotro.borno.kiebord.MainActivity")).apply {
+            val intent = Intent(this, getMainActivityClass()).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra("navigate_to", "themes")
             }
@@ -1041,7 +1047,7 @@ class KiebordService : InputMethodService() {
 
     fun openClipboardSettings() {
         try {
-            val intent = Intent(this, Class.forName("com.codepotro.borno.kiebord.MainActivity")).apply {
+            val intent = Intent(this, getMainActivityClass()).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra("navigate_to", "clipboard")
             }

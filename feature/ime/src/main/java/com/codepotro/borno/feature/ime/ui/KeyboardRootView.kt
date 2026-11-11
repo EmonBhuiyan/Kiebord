@@ -1055,7 +1055,10 @@ fun KeyboardRootView(
                 isSuggestionsExpanded = false
                 isLanguagePickerOpen = false
                 try {
-                    val intent = android.content.Intent(context, Class.forName("com.codepotro.borno.kiebord.MainActivity")).apply {
+                    val activityClass = runCatching {
+                        Class.forName("${context.packageName}.MainActivity")
+                    }.getOrNull() ?: Class.forName("com.codepotro.borno.kiebord.MainActivity")
+                    val intent = android.content.Intent(context, activityClass).apply {
                         flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
                     }
                     context.startActivity(intent)
