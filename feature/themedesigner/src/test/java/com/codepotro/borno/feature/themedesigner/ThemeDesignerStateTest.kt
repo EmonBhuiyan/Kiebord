@@ -1,4 +1,4 @@
-﻿package com.codepotro.borno.feature.themedesigner
+package com.codepotro.borno.feature.themedesigner
 
 import androidx.compose.ui.graphics.Color
 import com.codepotro.borno.common.model.KeyDef
@@ -74,7 +74,7 @@ class ThemeDesignerStateTest {
 
         val spec = original.toSpec()
         assertNotNull(spec.spaceKey)
-        assertEquals(2, spec.perKeyOverrides.size)
+        assertEquals(3, spec.perKeyOverrides.size)
 
         val restored = ThemeDesignerState.fromSpec(spec)
         assertTrue(restored.spaceCustomEnabled)
@@ -203,5 +203,43 @@ class ThemeDesignerStateTest {
             assertEquals(applied.gradientEnd, restored.gradientEnd)
             assertEquals(applied.actionBackground, restored.actionBackground)
         }
+    }
+
+    @Test
+    fun `enter and symbols corner radius and pill toggles round-trip and resolve accurately`() {
+        assertTrue(ThemeDesignerState.defaultDark().symbolsIsPill)
+        val custom = ThemeDesignerState.defaultDark().copy(
+            keyCornerRadiusDp = 10f,
+            symbolsIsPill = false,
+            symbolsCornerRadiusDp = 14f,
+            actionIsPill = false,
+            actionCornerRadiusDp = 4f
+        )
+
+        val spec = custom.toSpec()
+        val restored = ThemeDesignerState.fromSpec(spec)
+        assertFalse(restored.symbolsIsPill)
+        assertEquals(14f, restored.symbolsCornerRadiusDp, 0.01f)
+        assertFalse(restored.actionIsPill)
+        assertEquals(4f, restored.actionCornerRadiusDp, 0.01f)
+
+        val scheme = spec.toKeyboardColorScheme()
+        val symbolsVisual = scheme.resolveKeycapVisual(key = KeyDef(label = "?123", type = KeyType.SYMBOLS))
+        assertFalse(symbolsVisual.isPill)
+        assertEquals(14f, symbolsVisual.cornerRadiusDp?.value ?: -1f, 0.01f)
+
+        val shiftVisual = scheme.resolveKeycapVisual(key = KeyDef(label = "Shift", type = KeyType.SHIFT))
+        assertFalse(shiftVisual.isPill)
+        assertEquals(10f, shiftVisual.cornerRadiusDp?.value ?: -1f, 0.01f)
+
+        val enterVisual = scheme.resolveKeycapVisual(key = KeyDef(label = "Enter", type = KeyType.ACTION))
+        assertFalse(enterVisual.isPill)
+        assertEquals(4f, enterVisual.cornerRadiusDp?.value ?: -1f, 0.01f)
+
+        val pillState = custom.copy(symbolsIsPill = true, actionIsPill = true)
+        val pillScheme = pillState.toSpec().toKeyboardColorScheme()
+        assertTrue(pillScheme.resolveKeycapVisual(key = KeyDef(label = "?123", type = KeyType.SYMBOLS)).isPill)
+        assertFalse(pillScheme.resolveKeycapVisual(key = KeyDef(label = "Shift", type = KeyType.SHIFT)).isPill)
+        assertTrue(pillScheme.resolveKeycapVisual(key = KeyDef(label = "Enter", type = KeyType.ACTION)).isPill)
     }
 }

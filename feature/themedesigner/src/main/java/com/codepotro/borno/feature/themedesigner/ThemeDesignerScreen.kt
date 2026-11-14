@@ -938,9 +938,25 @@ internal fun ThemeDesignerScreenContent(
                             pos = ItemPos.BOTTOM,
                             colors = colors,
                             onReset = if (abs(state.keyCornerRadiusDp - defState.keyCornerRadiusDp) > 0.2f) {
-                                { state = state.copy(keyCornerRadiusDp = defState.keyCornerRadiusDp) }
+                                {
+                                    val syncSymbols = abs(state.symbolsCornerRadiusDp - state.keyCornerRadiusDp) < 0.2f
+                                    val syncAction = abs(state.actionCornerRadiusDp - state.keyCornerRadiusDp) < 0.2f
+                                    state = state.copy(
+                                        keyCornerRadiusDp = defState.keyCornerRadiusDp,
+                                        symbolsCornerRadiusDp = if (syncSymbols) defState.keyCornerRadiusDp else state.symbolsCornerRadiusDp,
+                                        actionCornerRadiusDp = if (syncAction) defState.keyCornerRadiusDp else state.actionCornerRadiusDp
+                                    )
+                                }
                             } else null,
-                            onValueChange = { state = state.copy(keyCornerRadiusDp = it) }
+                            onValueChange = { newRadius ->
+                                val syncSymbols = abs(state.symbolsCornerRadiusDp - state.keyCornerRadiusDp) < 0.2f
+                                val syncAction = abs(state.actionCornerRadiusDp - state.keyCornerRadiusDp) < 0.2f
+                                state = state.copy(
+                                    keyCornerRadiusDp = newRadius,
+                                    symbolsCornerRadiusDp = if (syncSymbols) newRadius else state.symbolsCornerRadiusDp,
+                                    actionCornerRadiusDp = if (syncAction) newRadius else state.actionCornerRadiusDp
+                                )
+                            }
                         )
                     }
 
@@ -983,7 +999,7 @@ internal fun ThemeDesignerScreenContent(
                             title = "Shift Active Indicator",
                             subtitle = "Highlight color when Shift or Caps Lock is active",
                             color = state.shiftActiveColor,
-                            pos = ItemPos.BOTTOM,
+                            pos = ItemPos.MIDDLE,
                             colors = colors,
                             onReset = if (state.shiftActiveColor != defState.shiftActiveColor) {
                                 { state = state.copy(shiftActiveColor = defState.shiftActiveColor) }
@@ -996,6 +1012,28 @@ internal fun ThemeDesignerScreenContent(
                                 )
                             }
                         )
+                        DesignerToggleRow(
+                            title = "Pill-Shaped ?123 Key",
+                            subtitle = "Rounded stadium pill silhouette for ?123 key",
+                            checked = state.symbolsIsPill,
+                            pos = if (state.symbolsIsPill) ItemPos.BOTTOM else ItemPos.MIDDLE,
+                            colors = colors,
+                            onCheckedChange = { state = state.copy(symbolsIsPill = it) }
+                        )
+                        if (!state.symbolsIsPill) {
+                            DesignerSliderRow(
+                                title = "?123 Key Corner Radius",
+                                valueLabel = "${state.symbolsCornerRadiusDp.roundToInt()} dp",
+                                value = state.symbolsCornerRadiusDp,
+                                valueRange = 0f..24f,
+                                pos = ItemPos.BOTTOM,
+                                colors = colors,
+                                onReset = if (abs(state.symbolsCornerRadiusDp - state.keyCornerRadiusDp) > 0.2f) {
+                                    { state = state.copy(symbolsCornerRadiusDp = state.keyCornerRadiusDp) }
+                                } else null,
+                                onValueChange = { state = state.copy(symbolsCornerRadiusDp = it) }
+                            )
+                        }
                     }
 
                     DesignerKeyTab.ACTION -> {
@@ -1042,10 +1080,24 @@ internal fun ThemeDesignerScreenContent(
                             title = "Pill-Shaped Action Key",
                             subtitle = "Rounded stadium pill silhouette for Enter key",
                             checked = state.actionIsPill,
-                            pos = ItemPos.BOTTOM,
+                            pos = if (state.actionIsPill) ItemPos.BOTTOM else ItemPos.MIDDLE,
                             colors = colors,
                             onCheckedChange = { state = state.copy(actionIsPill = it) }
                         )
+                        if (!state.actionIsPill) {
+                            DesignerSliderRow(
+                                title = "Enter Key Corner Radius",
+                                valueLabel = "${state.actionCornerRadiusDp.roundToInt()} dp",
+                                value = state.actionCornerRadiusDp,
+                                valueRange = 0f..24f,
+                                pos = ItemPos.BOTTOM,
+                                colors = colors,
+                                onReset = if (abs(state.actionCornerRadiusDp - state.keyCornerRadiusDp) > 0.2f) {
+                                    { state = state.copy(actionCornerRadiusDp = state.keyCornerRadiusDp) }
+                                } else null,
+                                onValueChange = { state = state.copy(actionCornerRadiusDp = it) }
+                            )
+                        }
                     }
 
                     DesignerKeyTab.SPACE -> {
@@ -1371,11 +1423,12 @@ internal fun ThemeDesignerScreenContent(
                             }
                         )
 
+                        val hasShapeControls = selectedPerKeyTarget == KeyType.SYMBOLS.name || selectedPerKeyTarget == KeyType.ACTION.name
                         DesignerColorRow(
                             title = "${ThemeDesignerState.displayNameForOverrideKey(selectedPerKeyTarget)} Pressed Color",
                             subtitle = if (activeOverrideForTarget.pressedBackground != null) "Custom per-key pressed fill active" else "Using default pressed highlight",
                             color = activeOverrideForTarget.pressedBackground ?: state.keyPressedBackground,
-                            pos = ItemPos.BOTTOM,
+                            pos = if (hasShapeControls) ItemPos.MIDDLE else ItemPos.BOTTOM,
                             colors = colors,
                             onReset = if (activeOverrideForTarget.pressedBackground != null) {
                                 {
@@ -1397,6 +1450,53 @@ internal fun ThemeDesignerScreenContent(
                                 )
                             }
                         )
+                        if (selectedPerKeyTarget == KeyType.SYMBOLS.name) {
+                            DesignerToggleRow(
+                                title = "Pill-Shaped ?123 Key",
+                                subtitle = "Rounded stadium pill silhouette for ?123 key",
+                                checked = state.symbolsIsPill,
+                                pos = if (state.symbolsIsPill) ItemPos.BOTTOM else ItemPos.MIDDLE,
+                                colors = colors,
+                                onCheckedChange = { state = state.copy(symbolsIsPill = it) }
+                            )
+                            if (!state.symbolsIsPill) {
+                                DesignerSliderRow(
+                                    title = "?123 Key Corner Radius",
+                                    valueLabel = "${state.symbolsCornerRadiusDp.roundToInt()} dp",
+                                    value = state.symbolsCornerRadiusDp,
+                                    valueRange = 0f..24f,
+                                    pos = ItemPos.BOTTOM,
+                                    colors = colors,
+                                    onReset = if (abs(state.symbolsCornerRadiusDp - state.keyCornerRadiusDp) > 0.2f) {
+                                        { state = state.copy(symbolsCornerRadiusDp = state.keyCornerRadiusDp) }
+                                    } else null,
+                                    onValueChange = { state = state.copy(symbolsCornerRadiusDp = it) }
+                                )
+                            }
+                        } else if (selectedPerKeyTarget == KeyType.ACTION.name) {
+                            DesignerToggleRow(
+                                title = "Pill-Shaped Action Key",
+                                subtitle = "Rounded stadium pill silhouette for Enter key",
+                                checked = state.actionIsPill,
+                                pos = if (state.actionIsPill) ItemPos.BOTTOM else ItemPos.MIDDLE,
+                                colors = colors,
+                                onCheckedChange = { state = state.copy(actionIsPill = it) }
+                            )
+                            if (!state.actionIsPill) {
+                                DesignerSliderRow(
+                                    title = "Enter Key Corner Radius",
+                                    valueLabel = "${state.actionCornerRadiusDp.roundToInt()} dp",
+                                    value = state.actionCornerRadiusDp,
+                                    valueRange = 0f..24f,
+                                    pos = ItemPos.BOTTOM,
+                                    colors = colors,
+                                    onReset = if (abs(state.actionCornerRadiusDp - state.keyCornerRadiusDp) > 0.2f) {
+                                        { state = state.copy(actionCornerRadiusDp = state.keyCornerRadiusDp) }
+                                    } else null,
+                                    onValueChange = { state = state.copy(actionCornerRadiusDp = it) }
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -1,4 +1,4 @@
-﻿package com.codepotro.borno.feature.themedesigner
+package com.codepotro.borno.feature.themedesigner
 
 import androidx.compose.ui.graphics.Color
 import com.codepotro.borno.common.model.KeyDef
@@ -74,9 +74,12 @@ data class ThemeDesignerState(
     // Modifier & action keys
     val functionalBackground: Color = Color(0xFF242428),
     val functionalForeground: Color = Color(0xFFC7C9D1),
+    val symbolsIsPill: Boolean = true,
+    val symbolsCornerRadiusDp: Float = 8f,
     val actionBackground: Color = Color(0xFF4999FD),
     val actionForeground: Color = Color(0xFFFFFFFF),
     val actionIsPill: Boolean = true,
+    val actionCornerRadiusDp: Float = 8f,
 
     // Per-key color overrides
     val perKeyOverrides: Map<String, PerKeyColorStyle> = emptyMap(),
@@ -185,6 +188,8 @@ data class ThemeDesignerState(
         return copy(
             functionalBackground = def.functionalBackground,
             functionalForeground = def.functionalForeground,
+            symbolsIsPill = def.symbolsIsPill,
+            symbolsCornerRadiusDp = def.symbolsCornerRadiusDp,
             shiftActiveColor = def.shiftActiveColor
         )
     }
@@ -194,7 +199,8 @@ data class ThemeDesignerState(
         return copy(
             actionBackground = def.actionBackground,
             actionForeground = def.actionForeground,
-            actionIsPill = def.actionIsPill
+            actionIsPill = def.actionIsPill,
+            actionCornerRadiusDp = def.actionCornerRadiusDp
         )
     }
 
@@ -205,7 +211,8 @@ data class ThemeDesignerState(
             functionalForeground = def.functionalForeground,
             actionBackground = def.actionBackground,
             actionForeground = def.actionForeground,
-            actionIsPill = def.actionIsPill
+            actionIsPill = def.actionIsPill,
+            actionCornerRadiusDp = def.actionCornerRadiusDp
         )
     }
 
@@ -226,6 +233,8 @@ data class ThemeDesignerState(
         val def = baseDefault()
         return copy(
             accentColor = def.accentColor,
+            symbolsIsPill = def.symbolsIsPill,
+            symbolsCornerRadiusDp = def.symbolsCornerRadiusDp,
             shiftActiveColor = def.shiftActiveColor,
             activeOptionHighlightColor = def.activeOptionHighlightColor,
             suggestionBackground = def.suggestionBackground,
@@ -298,6 +307,14 @@ data class ThemeDesignerState(
                     flatForeground = style.foreground?.let { hex(it) }
                 )
             }
+            .toMutableMap()
+        if (symbolsIsPill || kotlin.math.abs(symbolsCornerRadiusDp - keyCornerRadiusDp) >= 0.01f) {
+            val existingSym = serializedOverrides[KeyType.SYMBOLS.name] ?: KeycapStyleSpec()
+            serializedOverrides[KeyType.SYMBOLS.name] = existingSym.copy(
+                cornerRadiusDp = symbolsCornerRadiusDp,
+                isPill = symbolsIsPill
+            )
+        }
 
         return KeyboardThemeSpec(
             schemaVersion = 2,
@@ -312,6 +329,7 @@ data class ThemeDesignerState(
                 stroke = stroke,
                 shadow = shadow,
                 cornerRadiusDp = keyCornerRadiusDp,
+                isPill = false,
                 pressedBackground = hex(keyPressedBackground),
                 flatForeground = hex(flatKeyForeground)
             ),
@@ -321,13 +339,14 @@ data class ThemeDesignerState(
                 stroke = stroke,
                 shadow = shadow,
                 cornerRadiusDp = keyCornerRadiusDp,
+                isPill = false,
                 pressedBackground = hex(keyPressedBackground)
             ),
             actionKey = KeycapStyleSpec(
                 background = hex(actionBackground),
                 foreground = hex(actionForeground),
                 shadow = shadow,
-                cornerRadiusDp = keyCornerRadiusDp,
+                cornerRadiusDp = actionCornerRadiusDp,
                 isPill = actionIsPill
             ),
             spaceKey = spaceSpec,
@@ -480,9 +499,12 @@ data class ThemeDesignerState(
                 spaceCornerRadiusDp = sp?.cornerRadiusDp ?: charRadius,
                 functionalBackground = c(fn.background, base.functionalBackground),
                 functionalForeground = c(fn.foreground, base.functionalForeground),
+                symbolsIsPill = spec.perKeyOverrides[KeyType.SYMBOLS.name]?.isPill ?: fn.isPill ?: base.symbolsIsPill,
+                symbolsCornerRadiusDp = spec.perKeyOverrides[KeyType.SYMBOLS.name]?.cornerRadiusDp ?: fn.cornerRadiusDp ?: charRadius,
                 actionBackground = c(act.background ?: spec.accentColor, base.actionBackground),
                 actionForeground = c(act.foreground, base.actionForeground),
                 actionIsPill = act.isPill ?: base.actionIsPill,
+                actionCornerRadiusDp = act.cornerRadiusDp ?: charRadius,
                 perKeyOverrides = parsedOverrides,
                 strokeEnabled = ch.stroke != null && ch.stroke!!.widthDp > 0f,
                 strokeColor = c(ch.stroke?.color, base.strokeColor),

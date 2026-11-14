@@ -1,4 +1,4 @@
-﻿package com.codepotro.borno.theme
+package com.codepotro.borno.theme
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.geometry.Size
@@ -178,7 +178,7 @@ data class KeyboardColorScheme(
                 0.dp
             }
 
-            val isPill = style.isPill ?: (key.type == KeyType.ACTION || key.type == KeyType.SYMBOLS || (!showKeyBorders && key.type == KeyType.SPACE))
+            val isPill = style.isPill ?: (style.cornerRadiusDp == null && (key.type == KeyType.ACTION || key.type == KeyType.SYMBOLS || (!showKeyBorders && key.type == KeyType.SPACE)))
             val cornerRadius = style.cornerRadiusDp?.dp
 
             val brush = if (!isPressed && (showKeyBorders || key.type == KeyType.ACTION || key.type == KeyType.SPACE)) {
