@@ -229,5 +229,42 @@ class SandboxedClipboardManagerTest {
         assertEquals("Item 20", manager2.clips[0].text)
         assertEquals("Item 1", manager2.clips[19].text)
     }
+
+    @Test
+    fun testPurgeExpiredRecentClipsClearsExpiredQuickPasteClip() {
+        val manager = SandboxedClipboardManager(filesDir = tempFolder.root)
+        val threeHoursAgo = System.currentTimeMillis() - (3 * 3600_000L)
+
+        val expired = manager.addClip("Expired quick paste", notifyQuickPaste = true, timestamp = threeHoursAgo)!!
+        assertEquals(expired.id, manager.quickPasteClip?.id)
+
+        manager.purgeExpiredRecentClips(durationHours = 1)
+
+        assertTrue(manager.clips.isEmpty())
+        assertEquals(null, manager.quickPasteClip)
+    }
+
+    @Test
+    fun testUpdateAutoDeletePolicyPurgesImmediatelyAndPersistsInMemory() {
+        val manager = SandboxedClipboardManager(filesDir = tempFolder.root)
+        val now = System.currentTimeMillis()
+
+        manager.addClip("Old unpinned", timestamp = now - (4 * 3600_000L))
+        val pinnedOld = manager.addClip("Old pinned", timestamp = now - (4 * 3600_000L))!!
+        manager.togglePin(pinnedOld)
+        manager.addClip("Recent unpinned", timestamp = now - (30 * 60_000L))
+
+        manager.updateAutoDeletePolicy(enabled = true, durationHours = 2)
+
+        assertEquals(2, manager.clips.size)
+        assertFalse(manager.clips.any { it.text == "Old unpinned" })
+        assertTrue(manager.clips.any { it.text == "Old pinned" })
+        assertTrue(manager.clips.any { it.text == "Recent unpinned" })
+
+        // Subsequent purgeExpiredClips uses the live in-memory policy
+        manager.addClip("Another old clip", timestamp = now - (3 * 3600_000L))
+        manager.purgeExpiredClips()
+        assertFalse(manager.clips.any { it.text == "Another old clip" })
+    }
 }
 

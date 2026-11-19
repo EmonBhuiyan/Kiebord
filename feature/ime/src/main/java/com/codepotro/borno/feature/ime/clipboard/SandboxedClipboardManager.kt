@@ -45,7 +45,13 @@ class SandboxedClipboardManager internal constructor(
     private var lastSyncedText: String? = null
     private var lastSyncedTimestamp: Long = 0L
 
+    @Volatile
+    private var autoDeleteRecentClipsEnabled: Boolean = false
+    @Volatile
+    private var autoDeleteRecentClipsDurationHours: Int = 24
+
     init {
+        loadAutoDeletePolicyFromPrefs()
         loadClipsFromDiskSync()
         purgeExpiredRecentClipsFromPrefs()
         if (appContext != null) {
@@ -123,6 +129,16 @@ class SandboxedClipboardManager internal constructor(
                 0L
             }
 
+            val now = System.currentTimeMillis()
+            if (autoDeleteRecentClipsEnabled && clipTimestamp > 0L) {
+                val cutoff = now - (autoDeleteRecentClipsDurationHours.coerceIn(1, 48) * 3600_000L)
+                val isPinnedMatch = clips.any { it.isPinned && it.text == trimmed }
+                if (!isPinnedMatch && clipTimestamp < cutoff) {
+                    clearSystemClipboardIfMatching { it == trimmed }
+                    return
+                }
+            }
+
             val isNewCopy = forceNotify || (trimmed != lastSyncedText) || (clipTimestamp > 0L && clipTimestamp != lastSyncedTimestamp)
 
             if (clipTimestamp > 0L) {
@@ -131,12 +147,17 @@ class SandboxedClipboardManager internal constructor(
             lastSyncedText = trimmed
 
             if (isNewCopy) {
-                addClip(trimmed, notifyQuickPaste = true)
+                val effectiveTimestamp = if (clipTimestamp in 1L..now) clipTimestamp else now
+                addClip(trimmed, notifyQuickPaste = true, timestamp = effectiveTimestamp)
             }
         } catch (_: Exception) {}
     }
 
-    fun addClip(text: String, notifyQuickPaste: Boolean = true): ClipboardEntry? {
+    fun addClip(
+        text: String,
+        notifyQuickPaste: Boolean = true,
+        timestamp: Long = System.currentTimeMillis()
+    ): ClipboardEntry? {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return null
 
@@ -144,7 +165,7 @@ class SandboxedClipboardManager internal constructor(
         val entry = if (existingIndex >= 0) {
             val existing = clips[existingIndex]
             clips.removeAt(existingIndex)
-            val updated = existing.copy(id = java.util.UUID.randomUUID().toString(), timestamp = System.currentTimeMillis())
+            val updated = existing.copy(id = java.util.UUID.randomUUID().toString(), timestamp = timestamp)
             clips.add(0, updated)
             updated
         } else {
@@ -152,7 +173,7 @@ class SandboxedClipboardManager internal constructor(
             val newEntry = ClipboardEntry(
                 id = java.util.UUID.randomUUID().toString(),
                 text = trimmed,
-                timestamp = System.currentTimeMillis(),
+                timestamp = timestamp,
                 isOtp = isOtp
             )
             clips.add(0, newEntry)
@@ -344,31 +365,73 @@ class SandboxedClipboardManager internal constructor(
     private fun purgeExpiredOtps() {
         val now = System.currentTimeMillis()
         val fiveMinutes = 5 * 60 * 1000L
-        val removed = clips.removeAll { it.isOtp && !it.isPinned && (now - it.timestamp > fiveMinutes) }
-        if (removed) {
+        val expiredOtps = clips.filter { it.isOtp && !it.isPinned && (now - it.timestamp > fiveMinutes) }
+        if (expiredOtps.isNotEmpty()) {
+            val expiredIds = expiredOtps.map { it.id }.toSet()
+            val expiredTexts = expiredOtps.map { it.text.trim() }.toSet()
+            clips.removeAll { it.id in expiredIds }
+            if (quickPasteClip?.id in expiredIds) {
+                quickPasteClip = null
+            }
+            clearSystemClipboardIfMatching { it in expiredTexts }
             saveClipsToDisk()
         }
+    }
+
+    fun updateAutoDeletePolicy(enabled: Boolean, durationHours: Int) {
+        val clamped = durationHours.coerceIn(1, 48)
+        autoDeleteRecentClipsEnabled = enabled
+        autoDeleteRecentClipsDurationHours = clamped
+        val ctx = appContext
+        if (ctx != null) {
+            try {
+                ctx.getSharedPreferences("kiebord_fast_cache", Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean("auto_delete_recent_clips", enabled)
+                    .putInt("auto_delete_recent_clips_duration_hours", clamped)
+                    .apply()
+            } catch (_: Exception) {}
+        }
+        if (enabled) {
+            purgeExpiredRecentClips(clamped)
+        }
+    }
+
+    fun purgeExpiredClips() {
+        purgeExpiredOtps()
+        purgeExpiredRecentClipsFromPrefs()
     }
 
     fun purgeExpiredRecentClips(durationHours: Int) {
         val now = System.currentTimeMillis()
         val cutoff = now - (durationHours.coerceIn(1, 48) * 3600_000L)
-        val removed = clips.removeAll { !it.isPinned && it.timestamp < cutoff }
-        if (removed) {
+        val expired = clips.filter { !it.isPinned && it.timestamp < cutoff }
+        if (expired.isNotEmpty()) {
+            val expiredIds = expired.map { it.id }.toSet()
+            val expiredTexts = expired.map { it.text.trim() }.toSet()
+            clips.removeAll { it.id in expiredIds }
+            if (quickPasteClip?.id in expiredIds) {
+                quickPasteClip = null
+            }
+            clearSystemClipboardIfMatching { it in expiredTexts }
             saveClipsToDisk()
         }
     }
 
-    private fun purgeExpiredRecentClipsFromPrefs() {
+    private fun loadAutoDeletePolicyFromPrefs() {
         val ctx = appContext ?: return
         try {
             val prefs = ctx.getSharedPreferences("kiebord_fast_cache", Context.MODE_PRIVATE)
-            val enabled = prefs.getBoolean("auto_delete_recent_clips", false)
-            if (enabled) {
-                val hours = prefs.getInt("auto_delete_recent_clips_duration_hours", 24)
-                purgeExpiredRecentClips(hours)
-            }
+            autoDeleteRecentClipsEnabled = prefs.getBoolean("auto_delete_recent_clips", autoDeleteRecentClipsEnabled)
+            autoDeleteRecentClipsDurationHours = prefs.getInt("auto_delete_recent_clips_duration_hours", autoDeleteRecentClipsDurationHours).coerceIn(1, 48)
         } catch (_: Exception) {}
+    }
+
+    private fun purgeExpiredRecentClipsFromPrefs() {
+        loadAutoDeletePolicyFromPrefs()
+        if (autoDeleteRecentClipsEnabled) {
+            purgeExpiredRecentClips(autoDeleteRecentClipsDurationHours)
+        }
     }
 
     private fun isPotentialOtp(text: String): Boolean {

@@ -841,6 +841,7 @@ fun KeyboardRootView(
             isEmojiOpen = false
             isTextEditOpen = false
             isClipboardOpen = false
+            undoActionPillState = null
             isResizerOpen = false
             isSuggestionsExpanded = false
             isLanguagePickerOpen = false

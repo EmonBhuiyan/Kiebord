@@ -382,6 +382,10 @@ class KiebordService : InputMethodService() {
         serviceScope.launch {
             preferencesRepo.preferencesFlow.collect { prefs ->
                 preferencesState = prefs
+                clipboardManager.updateAutoDeletePolicy(
+                    enabled = prefs.autoDeleteRecentClips,
+                    durationHours = prefs.autoDeleteRecentClipsDurationHours
+                )
                 (transliterationManager as? GenericTransliterationManager)?.isAutoCorrectEnabled = prefs.phoneticAutoCorrect
                 val isDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
                 colorScheme = com.codepotro.borno.theme.ThemeRepository.getInstance(this@KiebordService).getColorScheme(prefs.theme, this@KiebordService, isDark = isDark)
@@ -729,11 +733,14 @@ class KiebordService : InputMethodService() {
                 delay(150)
                 clipboardManager.syncFromSystemClipboard(this@KiebordService)
             }
+        } else {
+            clipboardManager.purgeExpiredClips()
         }
     }
 
     override fun onWindowHidden() {
         finishComposing()
+        lastDeletedBatchState = null
         super.onWindowHidden()
         navBarInsetBottomPx = 0
         lifecycleOwner.onStop()
@@ -756,9 +763,12 @@ class KiebordService : InputMethodService() {
             colorScheme = com.codepotro.borno.theme.ThemeRepository.getInstance(this).getColorScheme(preferencesState.theme, this, isDark = isDark)
         }
         currentEditorInfoState = info
+        lastDeletedBatchState = null
         val isPass = InputModeResolver.isPasswordField(info)
         if (!isPass) {
             clipboardManager.syncFromSystemClipboard(this)
+        } else {
+            clipboardManager.purgeExpiredClips()
         }
         if (PredefinedLayouts.isBornoEasy(activeLayout.id) && !isPass) {
             val before = currentInputConnection?.getTextBeforeCursor(10, 0)?.toString() ?: ""
@@ -893,6 +903,7 @@ class KiebordService : InputMethodService() {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         finishComposing()
+        lastDeletedBatchState = null
         super.onFinishInputView(finishingInput)
         if (::voiceInputManager.isInitialized) {
             voiceInputManager.stop()
@@ -1191,6 +1202,7 @@ class KiebordService : InputMethodService() {
 
         when (key.type) {
             KeyType.CHARACTER -> {
+                lastDeletedBatchState = null
                 val effectiveShift = when {
                     !activeLayout.hasShiftKey() || isDedicatedNumberKey(key) -> ShiftState.UNSHIFTED
                     else -> shiftState
@@ -2648,6 +2660,7 @@ class KiebordService : InputMethodService() {
 
     private fun handleCandidateSelect(candidate: SuggestionCandidate) {
         performKeyFeedback()
+        lastDeletedBatchState = null
         if (PredefinedLayouts.isBornoEasy(activeLayout.id)) {
             isBornoEasyKarMode = false
             bornoEasyTypedCluster = ""

@@ -1,4 +1,4 @@
-﻿package com.codepotro.borno.kiebord.ui.settings
+package com.codepotro.borno.kiebord.ui.settings
 
 import android.content.ClipData
 import android.content.ClipboardManager as AndroidClipboardManager
@@ -115,6 +115,8 @@ fun ClipboardSettingsScreen(
 
     val autoDeleteEnabled = preferences?.autoDeleteRecentClips ?: preferencesState.autoDeleteRecentClips
     val durationHours = preferences?.autoDeleteRecentClipsDurationHours ?: preferencesState.autoDeleteRecentClipsDurationHours
+    var sliderDurationHours by remember(durationHours) { mutableStateOf(durationHours.toFloat()) }
+    val displayedDurationHours = sliderDurationHours.roundToInt().coerceIn(1, 48)
 
     LaunchedEffect(Unit) {
         clipboardManager.syncFromSystemClipboard(context)
@@ -126,20 +128,17 @@ fun ClipboardSettingsScreen(
         } else {
             scope.launch { preferencesRepo.updateAutoDeleteRecentClips(enabled) }
         }
-        if (enabled) {
-            clipboardManager.purgeExpiredRecentClips(durationHours)
-        }
+        clipboardManager.updateAutoDeletePolicy(enabled, displayedDurationHours)
     }
 
     fun setDuration(hours: Int) {
+        val clamped = hours.coerceIn(1, 48)
         if (onUpdateAutoDeleteRecentClipsDurationHours != null) {
-            onUpdateAutoDeleteRecentClipsDurationHours(hours)
+            onUpdateAutoDeleteRecentClipsDurationHours(clamped)
         } else {
-            scope.launch { preferencesRepo.updateAutoDeleteRecentClipsDurationHours(hours) }
+            scope.launch { preferencesRepo.updateAutoDeleteRecentClipsDurationHours(clamped) }
         }
-        if (autoDeleteEnabled) {
-            clipboardManager.purgeExpiredRecentClips(hours)
-        }
+        clipboardManager.updateAutoDeletePolicy(autoDeleteEnabled, clamped)
     }
 
     val allClips = clipboardManager.clips
@@ -230,7 +229,7 @@ fun ClipboardSettingsScreen(
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = if (autoDeleteEnabled) {
-                                "Deletes unpinned clips older than $durationHours ${if (durationHours == 1) "hour" else "hours"}"
+                                "Deletes unpinned clips older than $displayedDurationHours ${if (displayedDurationHours == 1) "hour" else "hours"}"
                             } else {
                                 "Automatically remove unpinned clips after a set time"
                             },
@@ -286,7 +285,7 @@ fun ClipboardSettingsScreen(
                                     .padding(horizontal = 12.dp, vertical = 4.dp)
                             ) {
                                 Text(
-                                    text = if (durationHours == 1) "1 hour" else "$durationHours hours",
+                                    text = if (displayedDurationHours == 1) "1 hour" else "$displayedDurationHours hours",
                                     color = colors.accent,
                                     fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Bold
@@ -295,8 +294,11 @@ fun ClipboardSettingsScreen(
                         }
 
                         Slider(
-                            value = durationHours.toFloat(),
-                            onValueChange = { setDuration(it.roundToInt().coerceIn(1, 48)) },
+                            value = sliderDurationHours,
+                            onValueChange = { sliderDurationHours = it },
+                            onValueChangeFinished = {
+                                setDuration(sliderDurationHours.roundToInt().coerceIn(1, 48))
+                            },
                             valueRange = 1f..48f,
                             steps = 46,
                             colors = SliderDefaults.colors(
