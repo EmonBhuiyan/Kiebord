@@ -1,4 +1,4 @@
-﻿package com.codepotro.borno.feature.ime.action
+package com.codepotro.borno.feature.ime.action
 
 import com.codepotro.borno.common.model.ShiftState
 import org.junit.Assert.assertEquals
@@ -129,6 +129,82 @@ class SuggestionCasingTest {
             shiftState = ShiftState.ONE_SHOT
         )
         assertEquals("আমি", formatted)
+    }
+
+    @Test
+    fun testNextWordCandidateInitialAsIsWhenUnshifted() {
+        assertEquals(
+            "the",
+            SuggestionCasingUtils.formatNextWordCandidate("the", ShiftState.UNSHIFTED, forceLowercaseWhenUnshifted = false)
+        )
+        assertEquals(
+            "Monday",
+            SuggestionCasingUtils.formatNextWordCandidate("Monday", ShiftState.UNSHIFTED, forceLowercaseWhenUnshifted = false)
+        )
+    }
+
+    @Test
+    fun testNextWordCandidateFollowsManualShiftCycle() {
+        // Shift pressed -> uppercase first letter only
+        assertEquals(
+            "Hello",
+            SuggestionCasingUtils.formatNextWordCandidate("hello", ShiftState.ONE_SHOT, forceLowercaseWhenUnshifted = true)
+        )
+        assertEquals(
+            "Hello",
+            SuggestionCasingUtils.formatNextWordCandidate("HELLO", ShiftState.ONE_SHOT, forceLowercaseWhenUnshifted = true)
+        )
+
+        // Shift locked -> uppercase whole word
+        assertEquals(
+            "HELLO",
+            SuggestionCasingUtils.formatNextWordCandidate("hello", ShiftState.CAPS_LOCK, forceLowercaseWhenUnshifted = true)
+        )
+        assertEquals(
+            "MONDAY",
+            SuggestionCasingUtils.formatNextWordCandidate("Monday", ShiftState.CAPS_LOCK, forceLowercaseWhenUnshifted = true)
+        )
+
+        // Shift off -> all lowercase
+        assertEquals(
+            "hello",
+            SuggestionCasingUtils.formatNextWordCandidate("Hello", ShiftState.UNSHIFTED, forceLowercaseWhenUnshifted = true)
+        )
+        assertEquals(
+            "monday",
+            SuggestionCasingUtils.formatNextWordCandidate("Monday", ShiftState.UNSHIFTED, forceLowercaseWhenUnshifted = true)
+        )
+    }
+
+    @Test
+    fun testNextWordCandidateSupportsExtendedCasedAndPreservesUncasedScripts() {
+        // Extended Latin (e.g. French)
+        assertEquals(
+            "École",
+            SuggestionCasingUtils.formatNextWordCandidate("école", ShiftState.ONE_SHOT, forceLowercaseWhenUnshifted = true)
+        )
+        assertEquals(
+            "ÉCOLE",
+            SuggestionCasingUtils.formatNextWordCandidate("école", ShiftState.CAPS_LOCK, forceLowercaseWhenUnshifted = true)
+        )
+        assertEquals(
+            "école",
+            SuggestionCasingUtils.formatNextWordCandidate("École", ShiftState.UNSHIFTED, forceLowercaseWhenUnshifted = true)
+        )
+
+        // Uncased script (Bengali) preserved in all shift states
+        assertEquals(
+            "বাংলা",
+            SuggestionCasingUtils.formatNextWordCandidate("বাংলা", ShiftState.ONE_SHOT, forceLowercaseWhenUnshifted = true)
+        )
+        assertEquals(
+            "বাংলা",
+            SuggestionCasingUtils.formatNextWordCandidate("বাংলা", ShiftState.CAPS_LOCK, forceLowercaseWhenUnshifted = true)
+        )
+        assertEquals(
+            "বাংলা",
+            SuggestionCasingUtils.formatNextWordCandidate("বাংলা", ShiftState.UNSHIFTED, forceLowercaseWhenUnshifted = true)
+        )
     }
 }
 

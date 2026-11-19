@@ -92,6 +92,8 @@ class KiebordService : InputMethodService() {
     private var isGestureAlternativeActive: Boolean = false
     private var lastSpaceTapTime: Long = 0L
     private var lastAutoSpacePunctuationTime: Long = 0L
+    private var rawNextWordPredictions: List<String> = emptyList()
+    private var nextWordManualShiftActive: Boolean = false
 
     private fun isM17nLayout(): Boolean {
         return activeLayout.processor == "m17n" ||
@@ -882,10 +884,10 @@ class KiebordService : InputMethodService() {
         val info = currentEditorInfoState ?: currentInputEditorInfo
         val isPassOrPin = InputModeResolver.isPasswordField(info) || InputModeResolver.isDirectCommit(info) || PredefinedLayouts.isNumberLayout(activeLayout.id)
         if (!translitMgr.isComposing && composingBuffer.isEmpty() && !isPassOrPin) {
-            updateSuggestions()
             if (shiftState != ShiftState.CAPS_LOCK) {
                 updateAutoCapitalizationState()
             }
+            updateSuggestions()
         }
     }
 
@@ -1376,6 +1378,15 @@ class KiebordService : InputMethodService() {
                         ShiftState.ONE_SHOT
                     }
                 }
+                if (activeLayout.hasShiftKey() &&
+                    !isTransliterationLayout() &&
+                    composingBuffer.isEmpty() &&
+                    !getTransliterationManager().isComposing &&
+                    rawNextWordPredictions.isNotEmpty()
+                ) {
+                    nextWordManualShiftActive = true
+                    refreshNextWordSuggestionCasing()
+                }
             }
             KeyType.DELETE -> {
                 if (shiftState == ShiftState.ONE_SHOT) {
@@ -1452,10 +1463,10 @@ class KiebordService : InputMethodService() {
                     val before = ic.getTextBeforeCursor(10, 0)?.toString() ?: ""
                     updateBornoEasyStateFromText(before)
                 }
-                updateSuggestions()
                 if (shiftState != ShiftState.CAPS_LOCK) {
                     updateAutoCapitalizationState()
                 }
+                updateSuggestions()
             }
             KeyType.ACTION -> {
                 finishComposing()
@@ -2937,6 +2948,20 @@ class KiebordService : InputMethodService() {
         return false
     }
 
+    private fun refreshNextWordSuggestionCasing() {
+        if (rawNextWordPredictions.isEmpty() || !activeLayout.hasShiftKey()) return
+        val formattedMerged = rawNextWordPredictions.map {
+            com.codepotro.borno.feature.ime.action.SuggestionCasingUtils.formatNextWordCandidate(
+                word = it,
+                shiftState = shiftState,
+                forceLowercaseWhenUnshifted = nextWordManualShiftActive
+            )
+        }.distinct()
+        activeSuggestions = filterAndMarkCandidates(formattedMerged.mapIndexed { idx, word ->
+            SuggestionCandidate(text = word, isPrimary = idx == 0)
+        })
+    }
+
     private fun updateSuggestions() {
         val editorInfo = currentEditorInfoState ?: currentInputEditorInfo
         if (!preferencesState.suggestionsEnabled || activeLayout.noSuggestions || primaryAlphaLayout.noSuggestions ||
@@ -2944,15 +2969,21 @@ class KiebordService : InputMethodService() {
             InputModeResolver.isPasswordField(editorInfo) ||
             InputModeResolver.isDirectCommit(editorInfo) ||
             InputModeResolver.shouldSuppressSuggestions(editorInfo)) {
+            rawNextWordPredictions = emptyList()
+            nextWordManualShiftActive = false
             activeSuggestions = emptyList()
             return
         }
 
         if (isGestureAlternativeActive && lastGestureCommittedWord.isNotEmpty()) {
+            rawNextWordPredictions = emptyList()
+            nextWordManualShiftActive = false
             return
         }
 
         if (isTransliterationLayout()) {
+            rawNextWordPredictions = emptyList()
+            nextWordManualShiftActive = false
             val translitMgr = getTransliterationManager()
             if (translitMgr.isComposing) {
                 val raw = translitMgr.currentRawInput
@@ -3112,6 +3143,8 @@ class KiebordService : InputMethodService() {
         val config = resolveSuggestionConfig(activeLayout)
         val prefix = config.cleanPrefix(composingBuffer.toString())
         if (prefix.isNotEmpty()) {
+            rawNextWordPredictions = emptyList()
+            nextWordManualShiftActive = false
             val queryPrefix = if (containsLatinText(prefix)) prefix.lowercase() else prefix
             val personalShortcuts = personalDictionaryRepo.getShortcutMatches(prefix, config.dictLang)
             val shortcutWords = personalShortcuts.map { it.word }.distinct()
@@ -3163,6 +3196,8 @@ class KiebordService : InputMethodService() {
             activeSuggestions = filterAndMarkCandidates(candidateList)
         } else {
             if (!preferencesState.nextWordPrediction || hasDoubleOrGreaterSpacing()) {
+                rawNextWordPredictions = emptyList()
+                nextWordManualShiftActive = false
                 activeSuggestions = emptyList()
                 return
             }
@@ -3174,8 +3209,16 @@ class KiebordService : InputMethodService() {
                 NativeEngine.queryNextWords(prev, config.dictLang, 10).filter(config.isValidCandidate)
             } else emptyList()
             val merged = (learnedNext + predictions).distinct().take(12)
-            val formattedMerged = if (shiftState == ShiftState.ONE_SHOT || shiftState == ShiftState.CAPS_LOCK) {
-                merged.map { formatSuggestionCandidateCase(it, "") }.distinct()
+            rawNextWordPredictions = merged
+            nextWordManualShiftActive = false
+            val formattedMerged = if (activeLayout.hasShiftKey()) {
+                merged.map {
+                    com.codepotro.borno.feature.ime.action.SuggestionCasingUtils.formatNextWordCandidate(
+                        word = it,
+                        shiftState = shiftState,
+                        forceLowercaseWhenUnshifted = false
+                    )
+                }.distinct()
             } else {
                 merged
             }
