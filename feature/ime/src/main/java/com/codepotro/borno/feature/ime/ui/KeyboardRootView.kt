@@ -435,6 +435,18 @@ fun KeyboardRootView(
     var emojiSearchQuery by remember { mutableStateOf("") }
 
     val handleKeyTapUnified: (KeyDef) -> Unit = { key ->
+        if (gestureTrail.isNotEmpty() || fadingTrail.isNotEmpty() || liveGestureCandidate != null) {
+            livePredictJob?.cancel()
+            livePredictJob = null
+            fadingTrailJob?.cancel()
+            fadingTrailJob = null
+            gestureTrail = emptyList()
+            fadingTrail = emptyList()
+            liveGestureCandidate = null
+        }
+        if (isToolbarOptionsVisible && (key.type == KeyType.CHARACTER || key.type == KeyType.DELETE || key.type == KeyType.SPACE)) {
+            isToolbarOptionsVisible = false
+        }
         if (voiceInputState is VoiceInputState.Listening) {
             onDismissVoiceTyping()
         }
@@ -845,6 +857,13 @@ fun KeyboardRootView(
             isResizerOpen = false
             isSuggestionsExpanded = false
             isLanguagePickerOpen = false
+            livePredictJob?.cancel()
+            livePredictJob = null
+            fadingTrailJob?.cancel()
+            fadingTrailJob = null
+            gestureTrail = emptyList()
+            fadingTrail = emptyList()
+            liveGestureCandidate = null
             clipboardManager?.syncFromSystemClipboard(context)
         }
     }

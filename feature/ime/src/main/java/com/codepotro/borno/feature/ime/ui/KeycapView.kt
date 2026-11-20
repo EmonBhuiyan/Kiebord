@@ -1,4 +1,4 @@
-﻿package com.codepotro.borno.feature.ime.ui
+package com.codepotro.borno.feature.ime.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -304,9 +304,10 @@ fun KeycapView(
                                 }
                             }
 
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
 
                                 if (!change.pressed) {
                                     // Touch released!
@@ -541,15 +542,20 @@ fun KeycapView(
                                 }
                             }
                         }
-                        if (isGestureTyping && !gestureEnded) {
-                            currentOnGestureEnd.value()
-                        }
-                        if (isMoreKeysActive) {
-                            isMoreKeysActive = false
-                            currentOnMoreKeysCommit.value()
-                        }
-                        isPressed = false
-                        isMoreKeysActive = false
+                            } finally {
+                                spacebarDwellJob?.cancel()
+                                longPressJob?.cancel()
+                                if (isGestureTyping && !gestureEnded) {
+                                    gestureEnded = true
+                                    currentOnGestureEnd.value()
+                                }
+                                if (isMoreKeysActive) {
+                                    isMoreKeysActive = false
+                                    currentOnMoreKeysCommit.value()
+                                }
+                                isPressed = false
+                                isMoreKeysActive = false
+                            }
                     }
                 }
             },

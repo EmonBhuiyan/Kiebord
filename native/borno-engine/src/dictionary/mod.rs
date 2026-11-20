@@ -883,6 +883,22 @@ fn test_iphone_casing() {
         // "wont" should suggest "won't" as #1
         let wont_sugs = dict.suggest("wont", 5, prox);
         assert_eq!(wont_sugs[0], "won't");
+
+        // "im" / "Im" / "IM" should suggest "I'm" / "I'M" right at the top (no false first-char case penalty)
+        for (q, expected) in [("im", "I'm"), ("Im", "I'm"), ("IM", "I'M")] {
+            let im_sugs = dict.suggest(q, 5, prox);
+            assert!(im_sugs.contains(&expected.to_string()), "Expected '{}' for '{}': {:?}", expected, q, im_sugs);
+            let pos = im_sugs.iter().position(|w| w == expected).unwrap();
+            assert!(pos <= 1, "'{}' should be top 2 for '{}', got index {} in {:?}", expected, q, pos, im_sugs);
+        }
+
+        // "ive" / "ill" / "id" should also suggest "I've" / "I'll" / "I'd"
+        let ive_sugs = dict.suggest("ive", 5, prox);
+        assert_eq!(ive_sugs[0], "I've");
+        let ill_sugs = dict.suggest("ill", 5, prox);
+        assert!(ill_sugs.contains(&"I'll".to_string()), "Expected 'I'll' for 'ill': {:?}", ill_sugs);
+        let id_sugs = dict.suggest("id", 5, prox);
+        assert!(id_sugs.contains(&"I'd".to_string()), "Expected 'I'd' for 'id': {:?}", id_sugs);
     }
 
     #[test]

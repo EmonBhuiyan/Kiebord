@@ -900,10 +900,11 @@ impl<'a> BinaryDict<'a> {
                     let target_first_ch = search_input.chars().next();
                     let target_second_ch = search_input.chars().nth(1);
                     let is_first_mismatch = match (target_first_ch, word_str.chars().next()) {
-                        (Some(fc), Some(ac)) if fc == ac || prox.is_case_pair(fc, ac) => false,
+                        (Some(fc), Some(ac)) if fc == ac || fc.eq_ignore_ascii_case(&ac) || prox.is_case_pair(fc, ac) => false,
                         (Some(fc), Some(ac)) => {
                             if let (Some(sc), Some(a_sc)) = (target_second_ch, word_str.chars().nth(1)) {
-                                !((ac == sc || prox.is_case_pair(sc, ac)) && (a_sc == fc || prox.is_case_pair(fc, a_sc)))
+                                !((ac == sc || sc.eq_ignore_ascii_case(&ac) || prox.is_case_pair(sc, ac))
+                                    && (a_sc == fc || fc.eq_ignore_ascii_case(&a_sc) || prox.is_case_pair(fc, a_sc)))
                             } else {
                                 true
                             }
@@ -1000,29 +1001,31 @@ impl<'a> BinaryDict<'a> {
                 }
             }
 
-            // 1b. Contraction apostrophe bypass (e.g. user typed 'hell' for 'he'll', 'well' for 'we'll', 'cant' for 'can't')
+            // 1b. Contraction apostrophe bypass (e.g. user typed 'hell' for 'he'll', 'well' for 'we'll', 'cant' for 'can't', 'Im' for 'I'm')
             if state.accum_len > 0 {
                 const APOSTROPHES: [u16; 2] = [b'\'' as u16, 0x2019];
                 for &ap in &APOSTROPHES {
                     if let Some(ap_node) = self.child(state.node, ap) {
-                        if let Some(child_node) = self.child(ap_node, target) {
-                            if let Some((next_accum, next_len)) = state.with_pushed2(ap, target) {
-                                let child_mf = self.max_subtree_freq(child_node) as f32;
-                                let extra = (next_len as f32 - (state.typed_pos + 1) as f32).max(0.0);
-                                let is_exact = state.cost == 0.0;
-                                let child_cost = state.cost + 0.01;
-                                let bound = child_mf
-                                    + if is_exact { 48.0 } else { 0.0 }
-                                    - (child_cost * 80.0)
-                                    - (0.001 * extra);
-                                heap.push(State {
-                                    node: child_node,
-                                    typed_pos: state.typed_pos + 1,
-                                    accum: next_accum,
-                                    accum_len: next_len,
-                                    cost: child_cost,
-                                    bound,
-                                });
+                        for &t_unit in &exact_targets[..exact_len] {
+                            if let Some(child_node) = self.child(ap_node, t_unit) {
+                                if let Some((next_accum, next_len)) = state.with_pushed2(ap, t_unit) {
+                                    let child_mf = self.max_subtree_freq(child_node) as f32;
+                                    let extra = (next_len as f32 - (state.typed_pos + 1) as f32).max(0.0);
+                                    let is_exact = state.cost == 0.0;
+                                    let child_cost = state.cost + 0.01;
+                                    let bound = child_mf
+                                        + if is_exact { 48.0 } else { 0.0 }
+                                        - (child_cost * 80.0)
+                                        - (0.001 * extra);
+                                    heap.push(State {
+                                        node: child_node,
+                                        typed_pos: state.typed_pos + 1,
+                                        accum: next_accum,
+                                        accum_len: next_len,
+                                        cost: child_cost,
+                                        bound,
+                                    });
+                                }
                             }
                         }
                     }
