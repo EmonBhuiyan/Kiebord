@@ -24,6 +24,7 @@ import androidx.compose.material.icons.outlined.Mood
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.TouchApp
@@ -78,7 +79,8 @@ enum class ToolbarAction {
     UNDO,
     REDO,
     NUMBER_PAD,
-    EMOJI_ROW_TOGGLE
+    EMOJI_ROW_TOGGLE,
+    SHARE_BORNO
 }
 
 data class ToolbarItem(
@@ -165,7 +167,8 @@ fun ReorderableToolbar(
             ToolbarAction.UNDO to ToolbarItem(ToolbarAction.UNDO, iconResId = R.drawable.ic_undo, description = "Undo"),
             ToolbarAction.REDO to ToolbarItem(ToolbarAction.REDO, iconResId = R.drawable.ic_redo, description = "Redo"),
             ToolbarAction.NUMBER_PAD to ToolbarItem(ToolbarAction.NUMBER_PAD, icon = Icons.Outlined.Dialpad, description = "Number Pad"),
-            ToolbarAction.EMOJI_ROW_TOGGLE to ToolbarItem(ToolbarAction.EMOJI_ROW_TOGGLE, icon = Icons.Outlined.Mood, description = "Emoji Row")
+            ToolbarAction.EMOJI_ROW_TOGGLE to ToolbarItem(ToolbarAction.EMOJI_ROW_TOGGLE, icon = Icons.Outlined.Mood, description = "Emoji Row"),
+            ToolbarAction.SHARE_BORNO to ToolbarItem(ToolbarAction.SHARE_BORNO, icon = Icons.Outlined.Share, description = "Share Borno")
         )
     }
 

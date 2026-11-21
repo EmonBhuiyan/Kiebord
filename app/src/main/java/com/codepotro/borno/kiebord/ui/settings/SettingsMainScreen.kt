@@ -1,5 +1,8 @@
-﻿package com.codepotro.borno.kiebord.ui.settings
+package com.codepotro.borno.kiebord.ui.settings
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -63,6 +67,7 @@ fun SettingsMainScreen(
 ) {
     val scrollState = rememberScrollState()
     val colors = LocalSettingsColors.current
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -284,9 +289,26 @@ fun SettingsMainScreen(
 
         SettingsGroup {
             SettingsNavigationItem(
+                title = "Get Borno",
+                iconResId = R.drawable.ic_borno_icon,
+                position = GroupPosition.TOP,
+                onClick = {
+                    try {
+                        val intent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://play.google.com/store/apps/details?id=com.codepotro.borno")
+                        )
+                        context.startActivity(intent)
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "Could not open Play Store", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+
+            SettingsNavigationItem(
                 title = "About Kiebord",
                 iconResId = R.drawable.ic_launcher_foreground,
-                position = GroupPosition.ALONE,
+                position = GroupPosition.BOTTOM,
                 onClick = { onNavigate(SettingsScreen.About) }
             )
         }

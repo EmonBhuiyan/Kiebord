@@ -33,6 +33,7 @@ import androidx.compose.material.icons.outlined.Mood
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.TouchApp
@@ -130,7 +131,8 @@ fun ToolsDrawerView(
             ToolbarAction.UNDO to DrawerTool(ToolbarAction.UNDO, iconResId = R.drawable.ic_undo, label = "Undo"),
             ToolbarAction.REDO to DrawerTool(ToolbarAction.REDO, iconResId = R.drawable.ic_redo, label = "Redo"),
             ToolbarAction.NUMBER_PAD to DrawerTool(ToolbarAction.NUMBER_PAD, icon = Icons.Outlined.Dialpad, label = "Number Pad"),
-            ToolbarAction.EMOJI_ROW_TOGGLE to DrawerTool(ToolbarAction.EMOJI_ROW_TOGGLE, icon = Icons.Outlined.Mood, label = "Emoji row")
+            ToolbarAction.EMOJI_ROW_TOGGLE to DrawerTool(ToolbarAction.EMOJI_ROW_TOGGLE, icon = Icons.Outlined.Mood, label = "Emoji row"),
+            ToolbarAction.SHARE_BORNO to DrawerTool(ToolbarAction.SHARE_BORNO, icon = Icons.Outlined.Share, label = "Share Borno")
         )
     }
 

@@ -1,4 +1,4 @@
-﻿package com.codepotro.borno.kiebord.ui.settings
+package com.codepotro.borno.kiebord.ui.settings
 
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
@@ -412,7 +412,15 @@ private fun SettingsItemIcon(
 
     val isAppIcon = iconResId == R.drawable.ic_launcher || iconResId == R.drawable.ic_launcher_foreground
 
-    if (isAppIcon) {
+    if (iconResId == R.drawable.ic_borno_icon) {
+        Image(
+            painter = painterResource(iconResId),
+            contentDescription = null,
+            modifier = Modifier
+                .size(size)
+                .clip(RoundedCornerShape(50.dp))
+        )
+    } else if (isAppIcon) {
         Image(
             painter = painterResource(iconResId!!),
             contentDescription = null,

@@ -24,9 +24,12 @@ class NumberPadToolbarTest {
         val prefs = KiebordPreferences()
         assertTrue("pinnedTools must contain NUMBER_PAD by default", prefs.pinnedTools.contains("NUMBER_PAD"))
         assertEquals(
-            listOf("EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "THEME_TOGGLE"),
+            listOf("EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "SETTINGS"),
             prefs.pinnedTools
         )
+        assertTrue("drawerTools must contain THEME_TOGGLE by default", prefs.drawerTools.contains("THEME_TOGGLE"))
+        assertTrue("drawerTools must not contain SHARE_BORNO by default", !prefs.drawerTools.contains("SHARE_BORNO"))
+        assertEquals(ToolbarAction.SHARE_BORNO, ToolbarAction.valueOf("SHARE_BORNO"))
     }
 
     @Test

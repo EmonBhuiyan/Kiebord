@@ -196,31 +196,32 @@ class KiebordPreferencesRepository private constructor(private val context: Cont
                 emojiSuggestions = prefs[PreferencesKeys.EMOJI_SUGGESTIONS] ?: true,
 
                 pinnedTools = run {
-                    val defaultPinned = listOf("EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "THEME_TOGGLE")
-                    val allActionNames = listOf(
-                        "EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "THEME_TOGGLE", "RESIZER", "FLOATING",
-                        "NUMBER_ROW_TOGGLE", "SECONDARY_KEYS_TOGGLE", "KEY_POPUP_TOGGLE", "ONE_HANDED", "SETTINGS", "TRADITIONAL_MODE",
-                        "UNDO", "REDO", "EMOJI_ROW_TOGGLE"
+                    val defaultPinned = listOf("EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "SETTINGS")
+                    val validActionNames = listOf(
+                        "EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "SETTINGS", "THEME_TOGGLE", "RESIZER", "FLOATING",
+                        "NUMBER_ROW_TOGGLE", "SECONDARY_KEYS_TOGGLE", "KEY_POPUP_TOGGLE", "ONE_HANDED", "TRADITIONAL_MODE",
+                        "UNDO", "REDO", "EMOJI_ROW_TOGGLE", "SHARE_BORNO"
                     )
                     prefs[PreferencesKeys.PINNED_TOOLS]?.let { raw ->
-                        raw.split(",").filter { it in allActionNames }.distinct()
+                        raw.split(",").filter { it in validActionNames }.distinct()
                     } ?: defaultPinned
                 },
                 drawerTools = run {
-                    val defaultPinned = listOf("EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "THEME_TOGGLE")
-                    val defaultDrawer = listOf("RESIZER", "FLOATING", "NUMBER_ROW_TOGGLE", "SECONDARY_KEYS_TOGGLE", "KEY_POPUP_TOGGLE", "ONE_HANDED", "SETTINGS", "TRADITIONAL_MODE", "UNDO", "REDO", "EMOJI_ROW_TOGGLE")
-                    val allActionNames = listOf(
-                        "EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "THEME_TOGGLE", "RESIZER", "FLOATING",
-                        "NUMBER_ROW_TOGGLE", "SECONDARY_KEYS_TOGGLE", "KEY_POPUP_TOGGLE", "ONE_HANDED", "SETTINGS", "TRADITIONAL_MODE",
+                    val defaultPinned = listOf("EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "SETTINGS")
+                    val defaultDrawer = listOf("RESIZER", "FLOATING", "NUMBER_ROW_TOGGLE", "SECONDARY_KEYS_TOGGLE", "KEY_POPUP_TOGGLE", "ONE_HANDED", "THEME_TOGGLE", "TRADITIONAL_MODE", "UNDO", "REDO", "EMOJI_ROW_TOGGLE")
+                    val coreActionNames = listOf(
+                        "EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "SETTINGS", "THEME_TOGGLE", "RESIZER", "FLOATING",
+                        "NUMBER_ROW_TOGGLE", "SECONDARY_KEYS_TOGGLE", "KEY_POPUP_TOGGLE", "ONE_HANDED", "TRADITIONAL_MODE",
                         "UNDO", "REDO", "EMOJI_ROW_TOGGLE"
                     )
+                    val validActionNames = coreActionNames + "SHARE_BORNO"
                     val pinnedList = prefs[PreferencesKeys.PINNED_TOOLS]?.let { raw ->
-                        raw.split(",").filter { it in allActionNames }.distinct()
+                        raw.split(",").filter { it in validActionNames }.distinct()
                     } ?: defaultPinned
                     val pinnedSet = pinnedList.toSet()
-                    val rawDrawer = prefs[PreferencesKeys.DRAWER_TOOLS]?.split(",")?.filter { it in allActionNames } ?: defaultDrawer
+                    val rawDrawer = prefs[PreferencesKeys.DRAWER_TOOLS]?.split(",")?.filter { it in validActionNames } ?: defaultDrawer
                     (rawDrawer.filter { it !in pinnedSet } +
-                        allActionNames.filter { it !in pinnedSet }).distinct()
+                        coreActionNames.filter { it !in pinnedSet }).distinct()
                 },
                 voiceTypingEnabled = prefs[PreferencesKeys.VOICE_TYPING_ENABLED] ?: true,
                 voiceTypingProvider = prefs[PreferencesKeys.VOICE_TYPING_PROVIDER] ?: KiebordPreferences.VOICE_PROVIDER_GOOGLE,
@@ -552,16 +553,16 @@ class KiebordPreferencesRepository private constructor(private val context: Cont
     }
 
     suspend fun updateToolbarTools(pinned: List<String>, drawer: List<String>) {
-        val defaultPinned = listOf("EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "THEME_TOGGLE")
-        val allActionNames = listOf(
-            "EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "THEME_TOGGLE", "RESIZER", "FLOATING",
-            "NUMBER_ROW_TOGGLE", "SECONDARY_KEYS_TOGGLE", "KEY_POPUP_TOGGLE", "ONE_HANDED", "SETTINGS", "TRADITIONAL_MODE",
+        val coreActionNames = listOf(
+            "EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "SETTINGS", "THEME_TOGGLE", "RESIZER", "FLOATING",
+            "NUMBER_ROW_TOGGLE", "SECONDARY_KEYS_TOGGLE", "KEY_POPUP_TOGGLE", "ONE_HANDED", "TRADITIONAL_MODE",
             "UNDO", "REDO", "EMOJI_ROW_TOGGLE"
         )
-        val sanitizedPinned = pinned.filter { it in allActionNames }.distinct()
+        val validActionNames = coreActionNames + "SHARE_BORNO"
+        val sanitizedPinned = pinned.filter { it in validActionNames }.distinct()
         val pinnedSet = sanitizedPinned.toSet()
-        val sanitizedDrawer = (drawer.filter { it in allActionNames && it !in pinnedSet } +
-            allActionNames.filter { it !in pinnedSet }).distinct()
+        val sanitizedDrawer = (drawer.filter { it in validActionNames && it !in pinnedSet } +
+            coreActionNames.filter { it !in pinnedSet }).distinct()
 
         context.kiebordDataStore.edit {
             it[PreferencesKeys.PINNED_TOOLS] = sanitizedPinned.joinToString(",")

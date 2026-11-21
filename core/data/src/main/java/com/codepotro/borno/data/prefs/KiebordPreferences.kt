@@ -77,8 +77,8 @@ data class KiebordPreferences(
     val emojiSuggestions: Boolean = true,
 
     // Toolbar rearrangement persistence
-    val pinnedTools: List<String> = listOf("EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "THEME_TOGGLE"),
-    val drawerTools: List<String> = listOf("RESIZER", "FLOATING", "NUMBER_ROW_TOGGLE", "SECONDARY_KEYS_TOGGLE", "KEY_POPUP_TOGGLE", "ONE_HANDED", "SETTINGS", "TRADITIONAL_MODE", "UNDO", "REDO", "EMOJI_ROW_TOGGLE"),
+    val pinnedTools: List<String> = listOf("EMOJI", "TEXT_EDIT", "NUMBER_PAD", "CLIPBOARD", "SETTINGS"),
+    val drawerTools: List<String> = listOf("RESIZER", "FLOATING", "NUMBER_ROW_TOGGLE", "SECONDARY_KEYS_TOGGLE", "KEY_POPUP_TOGGLE", "ONE_HANDED", "THEME_TOGGLE", "TRADITIONAL_MODE", "UNDO", "REDO", "EMOJI_ROW_TOGGLE"),
 
     // Voice Typing
     val voiceTypingEnabled: Boolean = true,

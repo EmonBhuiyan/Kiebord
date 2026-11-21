@@ -513,14 +513,14 @@ class KiebordService : InputMethodService() {
             val density = LocalDensity.current
             val navBarBottomDp = with(density) { navBarInsetBottomPx.toDp() }
 
-            val defaultPinnedActions = listOf(ToolbarAction.EMOJI, ToolbarAction.TEXT_EDIT, ToolbarAction.NUMBER_PAD, ToolbarAction.CLIPBOARD, ToolbarAction.THEME_TOGGLE)
+            val defaultPinnedActions = listOf(ToolbarAction.EMOJI, ToolbarAction.TEXT_EDIT, ToolbarAction.NUMBER_PAD, ToolbarAction.CLIPBOARD, ToolbarAction.SETTINGS)
             val pinnedToolbarActions = preferencesState.pinnedTools.mapNotNull { name ->
                 try { ToolbarAction.valueOf(name) } catch (_: Exception) { null }
-            }.distinct()
+            }.filter { it != ToolbarAction.SHARE_BORNO }.distinct()
             val pinnedSet = pinnedToolbarActions.toSet()
             val drawerToolbarActions = (preferencesState.drawerTools.mapNotNull { name ->
                 try { ToolbarAction.valueOf(name) } catch (_: Exception) { null }
-            }.filter { it !in pinnedSet } + ToolbarAction.values().filter { it !in pinnedSet }).distinct()
+            }.filter { it != ToolbarAction.SHARE_BORNO && it !in pinnedSet } + ToolbarAction.values().filter { it != ToolbarAction.SHARE_BORNO && it !in pinnedSet }).distinct()
 
             val voiceInputState by voiceInputManager.state.collectAsState()
 

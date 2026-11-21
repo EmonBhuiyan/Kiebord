@@ -315,27 +315,29 @@ fun KeyboardRootView(
         ToolbarAction.TEXT_EDIT,
         ToolbarAction.NUMBER_PAD,
         ToolbarAction.CLIPBOARD,
-        ToolbarAction.THEME_TOGGLE
+        ToolbarAction.SETTINGS
     )
     val defaultDrawer = listOf(
         ToolbarAction.RESIZER,
+        ToolbarAction.FLOATING,
         ToolbarAction.NUMBER_ROW_TOGGLE,
         ToolbarAction.SECONDARY_KEYS_TOGGLE,
         ToolbarAction.KEY_POPUP_TOGGLE,
         ToolbarAction.ONE_HANDED,
-        ToolbarAction.SETTINGS,
+        ToolbarAction.THEME_TOGGLE,
         ToolbarAction.TRADITIONAL_MODE,
         ToolbarAction.UNDO,
-        ToolbarAction.REDO
+        ToolbarAction.REDO,
+        ToolbarAction.EMOJI_ROW_TOGGLE
     )
     var pinnedTools by remember(initialPinnedTools) {
-        val pinned = (initialPinnedTools ?: defaultPinned).distinct()
+        val pinned = (initialPinnedTools ?: defaultPinned).filter { it != ToolbarAction.SHARE_BORNO }.distinct()
         mutableStateOf(pinned)
     }
     var drawerTools by remember(initialDrawerTools, initialPinnedTools) {
-        val pSet = (initialPinnedTools ?: defaultPinned).toSet()
-        val dList = ((initialDrawerTools ?: defaultDrawer).filter { it !in pSet } +
-            ToolbarAction.values().filter { it !in pSet }).distinct()
+        val pSet = (initialPinnedTools ?: defaultPinned).filter { it != ToolbarAction.SHARE_BORNO }.toSet()
+        val dList = ((initialDrawerTools ?: defaultDrawer).filter { it != ToolbarAction.SHARE_BORNO && it !in pSet } +
+            ToolbarAction.values().filter { it != ToolbarAction.SHARE_BORNO && it !in pSet }).distinct()
         mutableStateOf(dList)
     }
 
@@ -345,10 +347,10 @@ fun KeyboardRootView(
     var drawerContainerBounds by remember { mutableStateOf<Rect?>(null) }
 
     val updateTools: (List<ToolbarAction>, List<ToolbarAction>) -> Unit = { newPinned, newDrawer ->
-        val sanitizedPinned = newPinned.distinct()
+        val sanitizedPinned = newPinned.filter { it != ToolbarAction.SHARE_BORNO }.distinct()
         val pinnedSet = sanitizedPinned.toSet()
-        val allActions = ToolbarAction.values().toList()
-        val sanitizedDrawer = (newDrawer.filter { it !in pinnedSet } +
+        val allActions = ToolbarAction.values().filter { it != ToolbarAction.SHARE_BORNO }
+        val sanitizedDrawer = (newDrawer.filter { it != ToolbarAction.SHARE_BORNO && it !in pinnedSet } +
             allActions.filter { it !in pinnedSet }).distinct()
 
         toolbarItemBounds.keys.retainAll(sanitizedPinned.toSet())
@@ -1107,6 +1109,7 @@ fun KeyboardRootView(
                 showEmojiRow = !showEmojiRow
                 onEmojiRowToggle?.invoke(showEmojiRow)
             }
+            ToolbarAction.SHARE_BORNO -> Unit
         }
     }
 
