@@ -598,6 +598,7 @@ class KiebordService : InputMethodService() {
                     gestureTypingEnabled = preferencesState.gestureTypingEnabled && activeLayout.isQwertyBased(),
                     showGestureTrail = preferencesState.showGestureTrail,
                     longPressDelayMs = preferencesState.longPressDelayMs.toLong(),
+                    longPressPrimaryShortcutsEnabled = preferencesState.longPressPrimaryShortcutsEnabled,
                     cursorTrackpadEnabled = preferencesState.cursorTrackpadEnabled,
                     heightScalePortrait = preferencesState.keyboardHeightScale,
                     heightScaleLandscape = preferencesState.keyboardHeightScaleLandscape,

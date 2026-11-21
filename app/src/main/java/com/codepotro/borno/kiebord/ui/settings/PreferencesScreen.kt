@@ -45,6 +45,7 @@ fun PreferencesScreen(
     onUpdateSound: (Boolean) -> Unit,
     onUpdateSoundVolume: (Int) -> Unit = {},
     onUpdateLongPressDelay: (Int) -> Unit,
+    onUpdateLongPressPrimaryShortcuts: (Boolean) -> Unit = {},
     onUpdateShowNumberRow: (Boolean) -> Unit,
     onUpdateShowKeyPopups: (Boolean) -> Unit,
     onUpdateShowSecondaryKeys: (Boolean) -> Unit = {},
@@ -271,8 +272,16 @@ fun PreferencesScreen(
                 valueRange = 150f..600f,
                 steps = 8,
                 valueLabel = delayLabel,
-                position = GroupPosition.ALONE,
+                position = GroupPosition.TOP,
                 onValueChange = { onUpdateLongPressDelay(it.toInt()) }
+            )
+
+            SettingsToggleItem(
+                title = "Long-Press Primary Shortcuts",
+                subtitle = "Show Select All, Cut, Copy, and Paste in key long-press menus",
+                checked = preferences.longPressPrimaryShortcutsEnabled,
+                position = GroupPosition.BOTTOM,
+                onCheckedChange = onUpdateLongPressPrimaryShortcuts
             )
         }
     }

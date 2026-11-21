@@ -575,6 +575,9 @@ fun KiebordSettingsApp(
                             onUpdateLongPressDelay = { delayMs ->
                                 scope.launch { preferencesRepo.updateLongPressDelayMs(delayMs) }
                             },
+                            onUpdateLongPressPrimaryShortcuts = { enabled ->
+                                scope.launch { preferencesRepo.updateLongPressPrimaryShortcutsEnabled(enabled) }
+                            },
                             onUpdateShowNumberRow = { enabled ->
                                 scope.launch { preferencesRepo.updateShowNumberRow(enabled) }
                             },

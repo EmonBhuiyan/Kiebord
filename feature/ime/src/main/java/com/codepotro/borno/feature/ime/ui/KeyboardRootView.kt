@@ -222,6 +222,7 @@ fun KeyboardRootView(
     gestureTypingEnabled: Boolean = true,
     showGestureTrail: Boolean = true,
     longPressDelayMs: Long = 300L,
+    longPressPrimaryShortcutsEnabled: Boolean = true,
     cursorTrackpadEnabled: Boolean = true,
     inputSessionId: Int = 0,
     actionKeyVisual: ActionKeyVisual = ActionKeyVisual.DefaultEnter,
@@ -1743,8 +1744,14 @@ fun KeyboardRootView(
                     ) {
                         // Shared MoreKeys & key press handlers for NumberRowBar and keyboard rows
 
-                    val openMoreKeysForAnchor: (KeyDef, Rect) -> Unit = { keyDef, keyRect ->
-                        val effectiveItems = if (keyDef.isEnterKey()) keyDef.resolveActionMoreKeys(keyDef.moreKeys) else keyDef.moreKeys
+                    val openMoreKeysForAnchor: (KeyDef, Rect) -> Unit = openMoreKeys@{ keyDef, keyRect ->
+                        val rawItems = if (keyDef.isEnterKey()) keyDef.resolveActionMoreKeys(keyDef.moreKeys) else keyDef.moreKeys
+                        val effectiveItems = if (longPressPrimaryShortcutsEnabled) {
+                            rawItems
+                        } else {
+                            rawItems.filterNot { KeyDef.isPrimaryShortcutToken(it) }
+                        }
+                        if (effectiveItems.isEmpty()) return@openMoreKeys
                         val dims = MoreKeysLayoutHelper.calculateDimensions(
                             density = density.density,
                             scaleFactor = scaleFactor,
@@ -2043,6 +2050,7 @@ fun KeyboardRootView(
                                 scaleFactor = scaleFactor,
                                 gestureTypingEnabled = isEffectiveGestureTypingEnabled,
                                 longPressDelayMs = longPressDelayMs,
+                                longPressPrimaryShortcutsEnabled = longPressPrimaryShortcutsEnabled,
                                 modifier = Modifier
                                     .weight(effectiveKey.widthWeight)
                                     .fillMaxHeight(),
@@ -2197,7 +2205,7 @@ fun KeyboardRootView(
                                         slidingHoveredKey = hoveredKey
                                         slidingHoveredBounds = hoveredBounds
 
-                                        if (hoveredKey != null && (hoveredKey.moreKeys.isNotEmpty() || hoveredKey.isEnterKey())) {
+                                        if (hoveredKey != null && hoveredKey.moreKeys(effectiveShiftState, includePrimaryShortcuts = longPressPrimaryShortcutsEnabled).isNotEmpty()) {
                                             val targetKey = hoveredKey
                                             val targetBounds = hoveredBounds!!
                                             slidingDwellJob = coroutineScope.launch {

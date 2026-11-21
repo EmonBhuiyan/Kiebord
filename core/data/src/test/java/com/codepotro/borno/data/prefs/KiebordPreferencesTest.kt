@@ -112,6 +112,15 @@ class KiebordPreferencesTest {
     }
 
     @Test
+    fun testLongPressPrimaryShortcutsEnabledDefaultAndMutation() {
+        val prefs = KiebordPreferences()
+        assertEquals(true, prefs.longPressPrimaryShortcutsEnabled)
+
+        val disabledPrefs = prefs.copy(longPressPrimaryShortcutsEnabled = false)
+        assertEquals(false, disabledPrefs.longPressPrimaryShortcutsEnabled)
+    }
+
+    @Test
     fun testSpacebarSwipeModeDefaultsAndMutation() {
         val prefs = KiebordPreferences()
         assertEquals(KiebordPreferences.SPACEBAR_MODE_SWIPE_LAYOUT_HOLD_CURSOR, prefs.spacebarSwipeMode)

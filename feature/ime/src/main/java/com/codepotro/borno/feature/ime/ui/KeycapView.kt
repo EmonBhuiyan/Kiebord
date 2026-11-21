@@ -132,7 +132,8 @@ fun KeycapView(
     onGestureEnd: () -> Unit = {},
     isInteractive: Boolean = true,
     gestureTypingEnabled: Boolean = true,
-    longPressDelayMs: Long = 300L
+    longPressDelayMs: Long = 300L,
+    longPressPrimaryShortcutsEnabled: Boolean = true
 ) {
     val colorScheme = KiebordTheme.colorScheme
     val density = LocalDensity.current
@@ -217,6 +218,7 @@ fun KeycapView(
     val currentOnGestureEnd = rememberUpdatedState(onGestureEnd)
     val currentGestureTypingEnabled = rememberUpdatedState(gestureTypingEnabled)
     val currentLongPressDelay = rememberUpdatedState(longPressDelayMs)
+    val currentLongPressPrimaryShortcutsEnabled = rememberUpdatedState(longPressPrimaryShortcutsEnabled)
     val currentShiftState = rememberUpdatedState(shiftState)
 
     val isSpecialNoPopupKey = key.type == KeyType.SPACE || key.commitText == "\u200C" || displaySymbolLabel.contains("ZWNJ") || displaySymbolLabel.contains("\n")
@@ -280,7 +282,7 @@ fun KeycapView(
                                 val coords = keyCoordinates
                                 isLongPressTriggered = true
                                 val activeShift = currentShiftState.value
-                                val activeMoreKeys = initialKey.moreKeys(activeShift)
+                                val activeMoreKeys = initialKey.moreKeys(activeShift, currentLongPressPrimaryShortcutsEnabled.value)
                                 if (initialKey.type == KeyType.DELETE) {
                                     isDeleteLongPressActive = true
                                     var repeatCount = 0
@@ -601,7 +603,7 @@ fun KeycapView(
         ) {
         // Flick up preview badge in top right corner (hidden when sliding symbol/shift mode is active, secondary keys disabled, or no moreKeys exist)
         val activeFlickUp = key.flickUp(shiftState)
-        val activeMoreKeys = key.moreKeys(shiftState)
+        val activeMoreKeys = key.moreKeys(shiftState, longPressPrimaryShortcutsEnabled)
         if (showSecondaryKeys && !activeFlickUp.isNullOrEmpty() && activeMoreKeys.isNotEmpty() && key.type == KeyType.CHARACTER && !isSlidingSymbolMode && !isSlidingShiftMode) {
             val isBanglaBadge = isBanglaText(activeFlickUp)
             val badgeFontSize = if (isBanglaBadge) 10f else 11.5f

@@ -55,6 +55,7 @@ class KiebordPreferencesRepository private constructor(private val context: Cont
         val SOUND_ON_KEYPRESS = booleanPreferencesKey("pref_sound_on_keypress")
         val SOUND_VOLUME = intPreferencesKey("pref_sound_volume")
         val LONG_PRESS_DELAY_MS = intPreferencesKey("pref_long_press_delay_ms")
+        val LONG_PRESS_PRIMARY_SHORTCUTS_ENABLED = booleanPreferencesKey("pref_long_press_primary_shortcuts_enabled")
         val CURSOR_TRACKPAD_ENABLED = booleanPreferencesKey("pref_cursor_trackpad_enabled")
         val SPACEBAR_SWIPE_MODE = stringPreferencesKey("pref_spacebar_swipe_mode")
         val ONE_HANDED_MODE = stringPreferencesKey("pref_one_handed_mode")
@@ -140,6 +141,7 @@ class KiebordPreferencesRepository private constructor(private val context: Cont
                 soundOnKeypress = prefs[PreferencesKeys.SOUND_ON_KEYPRESS] ?: false,
                 soundVolume = prefs[PreferencesKeys.SOUND_VOLUME] ?: 100,
                 longPressDelayMs = prefs[PreferencesKeys.LONG_PRESS_DELAY_MS] ?: 300,
+                longPressPrimaryShortcutsEnabled = prefs[PreferencesKeys.LONG_PRESS_PRIMARY_SHORTCUTS_ENABLED] ?: true,
                 cursorTrackpadEnabled = prefs[PreferencesKeys.CURSOR_TRACKPAD_ENABLED] ?: true,
                 spacebarSwipeMode = prefs[PreferencesKeys.SPACEBAR_SWIPE_MODE] ?: KiebordPreferences.SPACEBAR_MODE_SWIPE_LAYOUT_HOLD_CURSOR,
                 oneHandedMode = prefs[PreferencesKeys.ONE_HANDED_MODE] ?: KiebordPreferences.ONE_HANDED_OFF,
@@ -340,6 +342,10 @@ class KiebordPreferencesRepository private constructor(private val context: Cont
 
     suspend fun updateLongPressDelayMs(delayMs: Int) {
         context.kiebordDataStore.edit { it[PreferencesKeys.LONG_PRESS_DELAY_MS] = delayMs.coerceIn(150, 600) }
+    }
+
+    suspend fun updateLongPressPrimaryShortcutsEnabled(enabled: Boolean) {
+        context.kiebordDataStore.edit { it[PreferencesKeys.LONG_PRESS_PRIMARY_SHORTCUTS_ENABLED] = enabled }
     }
 
     suspend fun updateCursorTrackpadEnabled(enabled: Boolean) {

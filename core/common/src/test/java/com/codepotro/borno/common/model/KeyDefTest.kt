@@ -75,5 +75,44 @@ class KeyDefTest {
         org.junit.Assert.assertTrue(layoutWithShift.hasShiftKey())
         org.junit.Assert.assertFalse(layoutWithoutShift.hasShiftKey())
     }
+
+    @Test
+    fun moreKeys_filtersPrimaryShortcutsWhenDisabled() {
+        val zKey = KeyDef(
+            label = "z",
+            shiftedLabel = "Z",
+            moreKeys = listOf("ACTION_SELECT_ALL", "*")
+        )
+        assertEquals(listOf("ACTION_SELECT_ALL", "*"), zKey.moreKeys(ShiftState.UNSHIFTED, includePrimaryShortcuts = true))
+        assertEquals(listOf("*"), zKey.moreKeys(ShiftState.UNSHIFTED, includePrimaryShortcuts = false))
+
+        val cKey = KeyDef(
+            label = "c",
+            shiftedLabel = "C",
+            moreKeys = listOf("ACTION_COPY", "'", "ç"),
+            shiftedMoreKeys = listOf("action:cut", "ACTION_PASTE", "ACTION_UNDO", "ACTION_REDO")
+        )
+        assertEquals(listOf("'", "ç"), cKey.moreKeys(ShiftState.UNSHIFTED, includePrimaryShortcuts = false))
+        assertEquals(emptyList<String>(), cKey.moreKeys(ShiftState.ONE_SHOT, includePrimaryShortcuts = false))
+
+        val commaKey = KeyDef(
+            label = ",",
+            moreKeys = listOf("ACTION_SETTINGS", "ACTION_ONE_HANDED")
+        )
+        assertEquals(
+            listOf("ACTION_SETTINGS", "ACTION_ONE_HANDED"),
+            commaKey.moreKeys(ShiftState.UNSHIFTED, includePrimaryShortcuts = false)
+        )
+
+        val enterKey = KeyDef(
+            type = KeyType.ACTION,
+            icon = "enter",
+            moreKeys = listOf("ACTION_EMOJI")
+        )
+        assertEquals(
+            listOf("ACTION_EMOJI", "ACTION_NEW_LINE"),
+            enterKey.moreKeys(ShiftState.UNSHIFTED, includePrimaryShortcuts = false)
+        )
+    }
 }
 

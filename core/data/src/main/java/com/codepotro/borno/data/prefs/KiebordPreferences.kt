@@ -29,6 +29,7 @@ data class KiebordPreferences(
     val soundOnKeypress: Boolean = false,
     val soundVolume: Int = 100, // 1 - 100%
     val longPressDelayMs: Int = 300, // 150 - 600 ms
+    val longPressPrimaryShortcutsEnabled: Boolean = true,
     val cursorTrackpadEnabled: Boolean = true,
     val spacebarSwipeMode: String = SPACEBAR_MODE_SWIPE_LAYOUT_HOLD_CURSOR,
     val oneHandedMode: String = ONE_HANDED_OFF,

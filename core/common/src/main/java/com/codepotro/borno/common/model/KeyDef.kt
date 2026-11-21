@@ -121,12 +121,17 @@ data class KeyDef(
         return result
     }
 
-    fun moreKeys(shiftState: ShiftState): List<String> {
+    fun moreKeys(shiftState: ShiftState, includePrimaryShortcuts: Boolean = true): List<String> {
         val base = when (shiftState) {
             ShiftState.UNSHIFTED -> moreKeys
             ShiftState.ONE_SHOT, ShiftState.CAPS_LOCK -> shiftedMoreKeys ?: moreKeys
         }
-        return if (isEnterKey()) resolveActionMoreKeys(base) else base
+        val resolved = if (isEnterKey()) resolveActionMoreKeys(base) else base
+        return if (includePrimaryShortcuts) {
+            resolved
+        } else {
+            resolved.filterNot { isPrimaryShortcutToken(it) }
+        }
     }
 
     fun flickUp(shiftState: ShiftState): String? {
@@ -135,6 +140,19 @@ data class KeyDef(
             ShiftState.ONE_SHOT, ShiftState.CAPS_LOCK -> shiftedFlickUp ?: (if (shiftedMoreKeys != null) shiftedMoreKeys.firstOrNull { !it.startsWith("ACTION_") && !it.startsWith("action:") } else flickUp)
         }
         return if (raw.isNullOrEmpty() || raw.startsWith("ACTION_") || raw.startsWith("action:")) null else raw
+    }
+
+    companion object {
+        val PRIMARY_SHORTCUT_TOKENS: Set<String> = setOf(
+            "ACTION_SELECT_ALL", "action:select_all", "SELECT_ALL",
+            "ACTION_CUT", "action:cut", "CUT",
+            "ACTION_COPY", "action:copy", "COPY",
+            "ACTION_PASTE", "action:paste", "PASTE",
+            "ACTION_UNDO", "action:undo", "UNDO",
+            "ACTION_REDO", "action:redo", "REDO"
+        )
+
+        fun isPrimaryShortcutToken(token: String): Boolean = token in PRIMARY_SHORTCUT_TOKENS
     }
 }
 
