@@ -61,6 +61,7 @@ fun SuggestionStripView(
     isExpanded: Boolean = false,
     scaleFactor: Float = 1.0f,
     isFloating: Boolean = false,
+    maxVisibleCandidates: Int = 3,
     onExpandToggle: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -100,13 +101,14 @@ fun SuggestionStripView(
         val cornerRadius = (8 * effectiveScale).coerceIn(6f, 10f).dp
 
         // Dynamically determine visible candidates:
-        // Try 3 candidates -> if they do not fit, try 2 -> if they do not fit, show 1.
+        // Try up to maxVisibleCandidates (4 when enabled or emoji present, else 3) -> 3 -> 2 -> 1.
         // Never truncate any candidate.
         val visibleCandidates = remember(
             candidates,
             totalWidthPx,
             isScrollableMode,
             isExpanded,
+            maxVisibleCandidates,
             onExpandToggle != null,
             fontFamily,
             primaryFontSize,
@@ -148,7 +150,7 @@ fun SuggestionStripView(
                     }
                 }
 
-                if (hasEmoji && candidates.size >= 4) {
+                if ((maxVisibleCandidates >= 4 || hasEmoji) && candidates.size >= 4) {
                     val pool4 = candidates.take(4)
                     val needsBtn4 = candidates.size > 4 || isExpanded
                     val availWidth4 = if (needsBtn4 && onExpandToggle != null) availableWithBtn else availableWithoutBtn
