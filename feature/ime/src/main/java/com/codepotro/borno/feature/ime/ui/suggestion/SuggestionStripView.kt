@@ -57,7 +57,7 @@ fun SuggestionStripView(
     candidates: List<SuggestionCandidate>,
     onCandidateClick: (SuggestionCandidate) -> Unit,
     onCandidateLongClick: ((SuggestionCandidate) -> Unit)? = null,
-    mode: String = KiebordPreferences.SUGGESTION_BAR_MODE_NORMAL,
+    mode: String = KiebordPreferences.SUGGESTION_BAR_MODE_SCROLLABLE,
     isExpanded: Boolean = false,
     scaleFactor: Float = 1.0f,
     isFloating: Boolean = false,

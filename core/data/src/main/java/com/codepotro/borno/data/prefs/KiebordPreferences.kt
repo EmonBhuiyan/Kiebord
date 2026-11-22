@@ -74,7 +74,7 @@ data class KiebordPreferences(
     val autoSpaceAfterPunctuation: Boolean = true,
     val removeSpaceBeforePunctuation: Boolean = true,
     val traditionalMode: Boolean = false,
-    val suggestionBarMode: String = SUGGESTION_BAR_MODE_NORMAL,
+    val suggestionBarMode: String = SUGGESTION_BAR_MODE_SCROLLABLE,
     val emojiSuggestions: Boolean = true,
 
     // Toolbar rearrangement persistence

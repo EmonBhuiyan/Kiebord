@@ -169,7 +169,7 @@ fun KeyboardRootView(
     defaultOneHandedMode: String = "OFF",
     onOneHandedModeChange: ((String) -> Unit)? = null,
     suggestions: List<SuggestionCandidate> = emptyList(),
-    suggestionBarMode: String = KiebordPreferences.SUGGESTION_BAR_MODE_NORMAL,
+    suggestionBarMode: String = KiebordPreferences.SUGGESTION_BAR_MODE_SCROLLABLE,
     onCandidateSelect: (SuggestionCandidate) -> Unit = {},
     onUnlearnWord: (String) -> Unit = {},
     clipboardManager: SandboxedClipboardManager? = null,

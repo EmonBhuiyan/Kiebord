@@ -199,19 +199,19 @@ fun CorrectionsSuggestionsScreen(
 
             SettingsGroup(modifier = Modifier.padding(horizontal = 16.dp)) {
                 SettingsRadioOption(
-                    title = "Normal (Default)",
-                    subtitle = "Shows candidates with an expand button for the expanded view",
-                    selected = preferences.suggestionBarMode == KiebordPreferences.SUGGESTION_BAR_MODE_NORMAL,
+                    title = "Scrollable (Default)",
+                    subtitle = "Candidates can be scrolled horizontally instead of expanded view",
+                    selected = preferences.suggestionBarMode == KiebordPreferences.SUGGESTION_BAR_MODE_SCROLLABLE,
                     position = GroupPosition.TOP,
-                    onSelect = { onUpdateSuggestionBarMode(KiebordPreferences.SUGGESTION_BAR_MODE_NORMAL) }
+                    onSelect = { onUpdateSuggestionBarMode(KiebordPreferences.SUGGESTION_BAR_MODE_SCROLLABLE) }
                 )
 
                 SettingsRadioOption(
-                    title = "Scrollable",
-                    subtitle = "Candidates can be scrolled horizontally instead of expanded view",
-                    selected = preferences.suggestionBarMode == KiebordPreferences.SUGGESTION_BAR_MODE_SCROLLABLE,
+                    title = "Normal",
+                    subtitle = "Shows candidates with an expand button for the expanded view",
+                    selected = preferences.suggestionBarMode == KiebordPreferences.SUGGESTION_BAR_MODE_NORMAL,
                     position = GroupPosition.BOTTOM,
-                    onSelect = { onUpdateSuggestionBarMode(KiebordPreferences.SUGGESTION_BAR_MODE_SCROLLABLE) }
+                    onSelect = { onUpdateSuggestionBarMode(KiebordPreferences.SUGGESTION_BAR_MODE_NORMAL) }
                 )
             }
         }

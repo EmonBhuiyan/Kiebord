@@ -194,7 +194,7 @@ class KiebordPreferencesRepository private constructor(private val context: Cont
                 autoSpaceAfterPunctuation = prefs[PreferencesKeys.AUTO_SPACE_AFTER_PUNCTUATION] ?: true,
                 removeSpaceBeforePunctuation = prefs[PreferencesKeys.REMOVE_SPACE_BEFORE_PUNCTUATION] ?: true,
                 traditionalMode = prefs[PreferencesKeys.TRADITIONAL_MODE] ?: false,
-                suggestionBarMode = prefs[PreferencesKeys.SUGGESTION_BAR_MODE] ?: KiebordPreferences.SUGGESTION_BAR_MODE_NORMAL,
+                suggestionBarMode = prefs[PreferencesKeys.SUGGESTION_BAR_MODE] ?: KiebordPreferences.SUGGESTION_BAR_MODE_SCROLLABLE,
                 emojiSuggestions = prefs[PreferencesKeys.EMOJI_SUGGESTIONS] ?: true,
 
                 pinnedTools = run {
