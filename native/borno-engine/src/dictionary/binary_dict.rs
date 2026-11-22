@@ -1059,6 +1059,83 @@ impl<'a> BinaryDict<'a> {
                 }
             }
 
+            // 2b. Vowel-to-vowel substitution for common non-adjacent spelling errors
+            // (e.g. 'definately' -> 'definitely', 'seperate' -> 'separate', 'dinosaor' -> 'dinosaur')
+            let is_ascii_vowel = |u: u16| matches!(u, 97 | 101 | 105 | 111 | 117); // a, e, i, o, u
+            if state.cost == 0.0 && state.accum_len >= 1 && typed.len() >= 4 && is_ascii_vowel(target) {
+                let vowel_cost = 0.55f32;
+                if state.cost + vowel_cost <= max_cost {
+                    const VOWELS: [u16; 5] = [b'a' as u16, b'e' as u16, b'i' as u16, b'o' as u16, b'u' as u16];
+                    let target_ch = char::from_u32(target as u32);
+                    for &v in &VOWELS {
+                        if v == target {
+                            continue;
+                        }
+                        if let (Some(tc), Some(vc)) = (target_ch, char::from_u32(v as u32)) {
+                            if prox.are_neighbors(tc, vc) {
+                                continue;
+                            }
+                        }
+                        if let Some(child_node) = self.child(state.node, v) {
+                            if let Some((next_accum, next_len)) = state.with_pushed(v) {
+                                let child_mf = self.max_subtree_freq(child_node) as f32;
+                                let child_cost = state.cost + vowel_cost;
+                                heap.push(State {
+                                    node: child_node,
+                                    typed_pos: state.typed_pos + 1,
+                                    accum: next_accum,
+                                    accum_len: next_len,
+                                    cost: child_cost,
+                                    bound: child_mf - (child_cost * 80.0),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2c. General non-neighbor single-character substitution for longer words
+            if state.cost == 0.0 && state.accum_len >= 2 && typed.len() >= 5 {
+                let gen_sub_cost = 0.75f32;
+                if state.cost + gen_sub_cost <= max_cost {
+                    let target_ch = char::from_u32(target as u32);
+                    let target_is_vowel = is_ascii_vowel(target);
+                    let start = self.child_start(state.node as usize);
+                    let count = self.child_count(state.node as usize);
+                    for e in start..start + count {
+                        let label = self.edge_label(e);
+                        if label == target
+                            || label == b'\'' as u16
+                            || label == 0x2019
+                            || (exact_len == 2 && label == exact_targets[1])
+                        {
+                            continue;
+                        }
+                        if target_is_vowel && is_ascii_vowel(label) {
+                            continue;
+                        }
+                        if let (Some(tc), Some(lc)) = (target_ch, char::from_u32(label as u32)) {
+                            if prox.are_neighbors(tc, lc) {
+                                continue;
+                            }
+                        }
+                        let child_node = Self::edge_child(e);
+                        if let Some((next_accum, next_len)) = state.with_pushed(label) {
+                            let child_mf = self.max_subtree_freq(child_node) as f32;
+                            let child_cost = state.cost + gen_sub_cost;
+                            heap.push(State {
+                                node: child_node,
+                                typed_pos: state.typed_pos + 1,
+                                accum: next_accum,
+                                accum_len: next_len,
+                                cost: child_cost,
+                                bound: child_mf - (child_cost * 80.0),
+                            });
+                        }
+                    }
+                }
+            }
+
             // 3. Transposition (adjacent swap: 'teh' -> 'the')
             if state.typed_pos + 1 < typed.len() && state.cost + 0.40 <= max_cost {
                 let next_target = typed[state.typed_pos + 1];

@@ -61,6 +61,7 @@ import com.codepotro.borno.feature.ime.action.ActionKeyResolver
 import com.codepotro.borno.feature.ime.action.AutoSpaceUtils
 import com.codepotro.borno.feature.ime.action.ActionKeyVisual
 import com.codepotro.borno.feature.ime.action.CapsModeUtils
+import com.codepotro.borno.feature.ime.action.ComposingWordUtils
 import com.codepotro.borno.feature.ime.action.InputModeResolver
 import com.codepotro.borno.feature.ime.ui.KeyboardRootView
 import com.codepotro.borno.feature.ime.ui.suggestion.SuggestionCandidate
@@ -88,6 +89,10 @@ class KiebordService : InputMethodService() {
     private var transliterationManager: TransliterationManager =
         TransliterationManagerFactory.create("bn_borno", preferencesState.phoneticAutoCorrect) { currentInputConnection }
     private val composingBuffer = StringBuilder()
+    private var composingCursorOffset: Int = 0
+    private var composingStartOffset: Int = -1
+    private var lastKnownSelStart: Int = -1
+    private var lastKnownSelEnd: Int = -1
     private val gestureDecoder = CrossLanguageGestureDecoder()
     private var lastGestureCommittedWord: String = ""
     private var isGestureAlternativeActive: Boolean = false
@@ -813,7 +818,9 @@ class KiebordService : InputMethodService() {
             shiftState = ShiftState.UNSHIFTED
         }
         getTransliterationManager().reset()
-        composingBuffer.clear()
+        clearComposingState()
+        lastKnownSelStart = info?.initialSelStart ?: -1
+        lastKnownSelEnd = info?.initialSelEnd ?: -1
         lastGestureCommittedWord = ""
         isGestureAlternativeActive = false
         lastSpaceTapTime = 0L
@@ -821,7 +828,12 @@ class KiebordService : InputMethodService() {
         selectionAnchor = null
         selectionCursor = null
         if (!isPass) {
-            updateSuggestions()
+            val recomposed = if (lastKnownSelStart >= 0 && lastKnownSelStart == lastKnownSelEnd) {
+                recomposeWordAtCursor(currentInputConnection, lastKnownSelStart, lastKnownSelEnd)
+            } else {
+                recomposeWordAtCursor()
+            }
+            updateSuggestions(knownNotInWord = !recomposed && lastKnownSelStart >= 0 && lastKnownSelStart == lastKnownSelEnd)
         } else {
             activeSuggestions = emptyList()
         }
@@ -836,17 +848,21 @@ class KiebordService : InputMethodService() {
         candidatesEnd: Int
     ) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        lastKnownSelStart = newSelStart
+        lastKnownSelEnd = newSelEnd
         if (PredefinedLayouts.isBornoEasy(activeLayout.id) && composingBuffer.isEmpty()) {
             val before = currentInputConnection?.getTextBeforeCursor(10, 0)?.toString() ?: ""
             updateBornoEasyStateFromText(before)
         }
         val translitMgr = getTransliterationManager()
-        val isComposing = translitMgr.isComposing || composingBuffer.isNotEmpty()
+        val ic = currentInputConnection
+        val info = currentEditorInfoState ?: currentInputEditorInfo
+        val isPassOrPin = InputModeResolver.isPasswordField(info) ||
+                InputModeResolver.isDirectCommit(info) ||
+                PredefinedLayouts.isNumberLayout(activeLayout.id)
 
-        if (isComposing) {
-            // When typing normally, the cursor stays collapsed at the end of the candidate region.
-            // If the user touched another position, the cursor or selection moved away from candidatesEnd,
-            // or the composing span was cleared/invalidated by the host view.
+        if (translitMgr.isComposing) {
+            // For active phonetic/m17n transliteration, moving away from candidatesEnd commits it.
             val cursorMovedAway = candidatesStart < 0 ||
                     candidatesEnd < 0 ||
                     newSelStart != candidatesEnd ||
@@ -855,36 +871,87 @@ class KiebordService : InputMethodService() {
                     newSelEnd > candidatesEnd
 
             if (cursorMovedAway) {
-                val ic = currentInputConnection
-                val wordToLearn = when {
-                    translitMgr.isComposing -> translitMgr.currentTransliteration.trim()
-                    composingBuffer.isNotEmpty() -> BengaliBstiEngine.cleanPending(composingBuffer.toString()).trim()
-                    else -> ""
-                }
+                val wordToLearn = translitMgr.currentTransliteration.trim()
                 if (canLearnFromCurrentEditor() && wordToLearn.length >= UserDictionaryRepository.MIN_LEARN_LENGTH) {
                     val prevWord = getPrecedingWord(excludeComposing = true).takeIf { it.isNotBlank() }
                     userDictionaryRepo.recordWord(wordToLearn, prevWord)
                 }
 
                 translitMgr.reset()
-                composingBuffer.clear()
+                clearComposingState()
                 lastGestureCommittedWord = ""
                 isGestureAlternativeActive = false
 
                 ic?.finishComposingText()
-                val info = currentEditorInfoState ?: currentInputEditorInfo
-                val isPassOrPin = InputModeResolver.isPasswordField(info) || InputModeResolver.isDirectCommit(info) || PredefinedLayouts.isNumberLayout(activeLayout.id)
                 if (!isPassOrPin) {
-                    updateSuggestions()
+                    val collapsed = newSelStart == newSelEnd
+                    val recomposed = if (collapsed) recomposeWordAtCursor(ic, newSelStart, newSelEnd) else false
+                    if (shiftState != ShiftState.CAPS_LOCK) {
+                        updateAutoCapitalizationState()
+                    }
+                    updateSuggestions(knownNotInWord = collapsed && !recomposed)
                 } else {
                     activeSuggestions = emptyList()
                 }
                 return
             }
+            return
+        }
+
+        if (composingBuffer.isNotEmpty()) {
+            val cursorInsideComposing = newSelStart == newSelEnd &&
+                    candidatesStart >= 0 &&
+                    candidatesEnd > candidatesStart &&
+                    newSelStart in candidatesStart..candidatesEnd
+
+            if (cursorInsideComposing) {
+                composingStartOffset = candidatesStart
+                val spanLen = candidatesEnd - candidatesStart
+                if (spanLen == composingBuffer.length) {
+                    val newOffset = (newSelStart - candidatesStart).coerceIn(0, composingBuffer.length)
+                    val offsetChanged = newOffset != composingCursorOffset
+                    composingCursorOffset = newOffset
+                    if (offsetChanged && !isPassOrPin && activeSuggestions.isEmpty()) {
+                        updateSuggestions()
+                    }
+                    return
+                }
+                // Composing span length changed externally; re-sync with editor text.
+                clearComposingState()
+                if (!isPassOrPin) {
+                    val recomposed = recomposeWordAtCursor(ic, newSelStart, newSelEnd)
+                    updateSuggestions(knownNotInWord = !recomposed)
+                }
+                return
+            }
+
+            // Cursor moved outside the active composing region, selection became non-empty,
+            // or the host editor cleared the composing span.
+            val wordToLearn = BengaliBstiEngine.cleanPending(composingBuffer.toString()).trim()
+            if (canLearnFromCurrentEditor() && wordToLearn.length >= UserDictionaryRepository.MIN_LEARN_LENGTH) {
+                val prevWord = getPrecedingWord(excludeComposing = true).takeIf { it.isNotBlank() }
+                userDictionaryRepo.recordWord(wordToLearn, prevWord)
+            }
+
+            clearComposingState()
+            lastGestureCommittedWord = ""
+            isGestureAlternativeActive = false
+
+            ic?.finishComposingText()
+            if (!isPassOrPin) {
+                val collapsed = newSelStart == newSelEnd
+                val recomposed = if (collapsed) recomposeWordAtCursor(ic, newSelStart, newSelEnd) else false
+                if (shiftState != ShiftState.CAPS_LOCK) {
+                    updateAutoCapitalizationState()
+                }
+                updateSuggestions(knownNotInWord = collapsed && !recomposed)
+            } else {
+                activeSuggestions = emptyList()
+            }
+            return
         }
 
         if (isGestureAlternativeActive && lastGestureCommittedWord.isNotEmpty()) {
-            val ic = currentInputConnection
             val textBefore = ic?.getTextBeforeCursor(lastGestureCommittedWord.length + 1, 0)?.toString() ?: ""
             if (textBefore.endsWith(lastGestureCommittedWord)) {
                 return
@@ -893,18 +960,20 @@ class KiebordService : InputMethodService() {
                 lastGestureCommittedWord = ""
             }
         }
-        val info = currentEditorInfoState ?: currentInputEditorInfo
-        val isPassOrPin = InputModeResolver.isPasswordField(info) || InputModeResolver.isDirectCommit(info) || PredefinedLayouts.isNumberLayout(activeLayout.id)
-        if (!translitMgr.isComposing && composingBuffer.isEmpty() && !isPassOrPin) {
+        if (!isPassOrPin) {
+            val collapsed = newSelStart == newSelEnd
+            val recomposed = if (collapsed) recomposeWordAtCursor(ic, newSelStart, newSelEnd) else false
             if (shiftState != ShiftState.CAPS_LOCK) {
                 updateAutoCapitalizationState()
             }
-            updateSuggestions()
+            updateSuggestions(knownNotInWord = collapsed && !recomposed)
         }
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
         finishComposing()
+        lastKnownSelStart = -1
+        lastKnownSelEnd = -1
         lastDeletedBatchState = null
         super.onFinishInputView(finishingInput)
         if (::voiceInputManager.isInitialized) {
@@ -1077,6 +1146,104 @@ class KiebordService : InputMethodService() {
         } catch (_: Exception) {}
     }
 
+    private fun clearComposingState() {
+        composingBuffer.clear()
+        composingCursorOffset = 0
+        composingStartOffset = -1
+    }
+
+    private fun isComposingAllowedForCurrentEditor(): Boolean {
+        if (isSymbolsMode || PredefinedLayouts.isNumberLayout(activeLayout.id)) return false
+        val info = currentEditorInfoState ?: currentInputEditorInfo
+        if (InputModeResolver.isPasswordField(info) || InputModeResolver.isDirectCommit(info)) return false
+        return true
+    }
+
+    private fun isRecomposableWordChar(c: Char): Boolean {
+        return when {
+            activeLayout.id == "bn_probhat" || activeLayout.processor == "bn_fixed" -> isBengaliChar(c.toString())
+            activeLayout.id == "bn_easy" -> isBengaliChar(c.toString()) || c == '\u200C' || c == '\u200D'
+            isTransliterationLayout() && isBanglaLayout(activeLayout) ->
+                isBengaliChar(c.toString()) || c == '\u200C' || c == '\u200D'
+            else -> isComposingLetter(c.toString(), activeLayout)
+        }
+    }
+
+    private fun recomposeWordAtCursor(
+        ic: InputConnection? = currentInputConnection,
+        selStart: Int? = null,
+        selEnd: Int? = null
+    ): Boolean {
+        if (ic == null || !isComposingAllowedForCurrentEditor()) return false
+        if (selStart != null && selEnd != null && selStart != selEnd) return false
+        if (selStart == null || selEnd == null) {
+            if (!ic.getSelectedText(0).isNullOrEmpty()) return false
+        }
+        if (isTransliterationLayout() && getTransliterationManager().isComposing) return false
+
+        val textBefore = try { ic.getTextBeforeCursor(64, 0)?.toString() ?: "" } catch (_: Exception) { "" }
+        val textAfter = try { ic.getTextAfterCursor(64, 0)?.toString() ?: "" } catch (_: Exception) { "" }
+        val around = ComposingWordUtils.extractWordAroundCursor(textBefore, textAfter, ::isRecomposableWordChar)
+            ?: return false
+
+        val cursorPos = when {
+            selStart != null && selStart >= 0 -> selStart
+            lastKnownSelStart >= 0 && lastKnownSelStart == lastKnownSelEnd -> lastKnownSelStart
+            else -> {
+                val ext = try { ic.getExtractedText(ExtractedTextRequest(), 0) } catch (_: Exception) { null }
+                if (ext != null && ext.selectionStart == ext.selectionEnd && ext.selectionStart >= 0) {
+                    ext.startOffset + ext.selectionStart
+                } else {
+                    -1
+                }
+            }
+        }
+        if (cursorPos < around.charsBeforeCursor) return false
+
+        val wordStart = cursorPos - around.charsBeforeCursor
+        val wordEnd = cursorPos + around.charsAfterCursor
+
+        if (composingBuffer.toString() == around.word && composingStartOffset == wordStart) {
+            composingCursorOffset = around.charsBeforeCursor
+            return true
+        }
+
+        val ok = try {
+            ic.setComposingRegion(wordStart, wordEnd)
+        } catch (_: Exception) {
+            false
+        }
+        if (ok) {
+            composingBuffer.clear()
+            composingBuffer.append(around.word)
+            composingCursorOffset = around.charsBeforeCursor
+            composingStartOffset = wordStart
+            return true
+        }
+        return false
+    }
+
+    private fun syncComposingTextToEditor(ic: InputConnection, newText: String, newCursorOffset: Int) {
+        if (newText.isEmpty()) {
+            ic.setComposingText("", 1)
+            ic.finishComposingText()
+            clearComposingState()
+            return
+        }
+        composingBuffer.clear()
+        composingBuffer.append(newText)
+        composingCursorOffset = newCursorOffset.coerceIn(0, newText.length)
+        if (composingCursorOffset == newText.length || composingStartOffset < 0) {
+            ic.setComposingText(newText, 1)
+        } else {
+            val targetCursor = composingStartOffset + composingCursorOffset
+            ic.beginBatchEdit()
+            ic.setComposingText(newText, 1)
+            ic.setSelection(targetCursor, targetCursor)
+            ic.endBatchEdit()
+        }
+    }
+
     private fun finishComposing() {
         val ic = currentInputConnection
         val translitMgr = getTransliterationManager()
@@ -1100,7 +1267,7 @@ class KiebordService : InputMethodService() {
             if (composingBuffer.contains("\u200B")) {
                 ic?.setComposingText(clean, 1)
             }
-            composingBuffer.clear()
+            clearComposingState()
             wasComposing = true
         }
         if (wasComposing) {
@@ -1244,6 +1411,10 @@ class KiebordService : InputMethodService() {
                     isTransliterationLayout() -> {
                         if (isTransliterableChar(text) || isBengaliOrModifier(text) || isExtraCompositionChar(text)) {
                             val translitMgr = getTransliterationManager()
+                            if (!translitMgr.isComposing && composingBuffer.isNotEmpty()) {
+                                ic.finishComposingText()
+                                clearComposingState()
+                            }
                             if (!translitMgr.isComposing && shouldRemoveSpaceBeforePunctuation(text)) {
                                 val textBefore = ic.getTextBeforeCursor(1, 0)
                                 if (textBefore != null && textBefore.endsWith(" ")) {
@@ -1270,8 +1441,18 @@ class KiebordService : InputMethodService() {
                             finishComposing()
                             commitCharacterWithPunctuationHandling(ic, text)
                         } else if (isComposingLetter(text, activeLayout)) {
-                            composingBuffer.append(text)
-                            ic.setComposingText(composingBuffer.toString(), 1)
+                            if (composingBuffer.isEmpty() || composingCursorOffset == composingBuffer.length) {
+                                composingBuffer.append(text)
+                                composingCursorOffset = composingBuffer.length
+                                ic.setComposingText(composingBuffer.toString(), 1)
+                            } else {
+                                val (updated, newOffset) = ComposingWordUtils.insertAtCursor(
+                                    composingBuffer.toString(),
+                                    composingCursorOffset,
+                                    text
+                                )
+                                syncComposingTextToEditor(ic, updated, newOffset)
+                            }
                         } else {
                             val word = composingBuffer.toString().trim()
                             if (canLearnFromCurrentEditor() && preferencesState.learnedWordsEnabled && word.length >= UserDictionaryRepository.MIN_LEARN_LENGTH) {
@@ -1285,8 +1466,18 @@ class KiebordService : InputMethodService() {
                     // Bengali Probhat layout
                     activeLayout.id == "bn_probhat" -> {
                         if (isBengaliChar(text)) {
-                            composingBuffer.append(text)
-                            ic.setComposingText(composingBuffer.toString(), 1)
+                            if (composingBuffer.isEmpty() || composingCursorOffset == composingBuffer.length) {
+                                composingBuffer.append(text)
+                                composingCursorOffset = composingBuffer.length
+                                ic.setComposingText(composingBuffer.toString(), 1)
+                            } else {
+                                val (updated, newOffset) = ComposingWordUtils.insertAtCursor(
+                                    composingBuffer.toString(),
+                                    composingCursorOffset,
+                                    text
+                                )
+                                syncComposingTextToEditor(ic, updated, newOffset)
+                            }
                         } else {
                             val word = composingBuffer.toString().trim()
                             if (canLearnFromCurrentEditor() && preferencesState.learnedWordsEnabled && word.length >= UserDictionaryRepository.MIN_LEARN_LENGTH) {
@@ -1304,9 +1495,20 @@ class KiebordService : InputMethodService() {
                             isBornoEasyKarMode = false
                             bornoEasyTypedCluster = ""
                         } else if (isBengaliChar(text) || text == "\u200C" || text == "\u200D") {
-                            composingBuffer.append(text)
-                            ic.setComposingText(composingBuffer.toString(), 1)
-                            updateBornoEasyStateFromText(composingBuffer.toString())
+                            if (composingBuffer.isEmpty() || composingCursorOffset == composingBuffer.length) {
+                                composingBuffer.append(text)
+                                composingCursorOffset = composingBuffer.length
+                                ic.setComposingText(composingBuffer.toString(), 1)
+                                updateBornoEasyStateFromText(composingBuffer.toString())
+                            } else {
+                                val (updated, newOffset) = ComposingWordUtils.insertAtCursor(
+                                    composingBuffer.toString(),
+                                    composingCursorOffset,
+                                    text
+                                )
+                                syncComposingTextToEditor(ic, updated, newOffset)
+                                updateBornoEasyStateFromText(updated.substring(0, newOffset))
+                            }
                         } else {
                             val word = composingBuffer.toString().trim()
                             if (canLearnFromCurrentEditor() && preferencesState.learnedWordsEnabled && word.length >= UserDictionaryRepository.MIN_LEARN_LENGTH) {
@@ -1322,24 +1524,34 @@ class KiebordService : InputMethodService() {
                     // Bengali National (BSTI) layout
                     activeLayout.processor == "bn_fixed" -> {
                         if (isBengaliChar(text)) {
-                            composingBuffer.append(text)
-                            val isTraditional = preferencesState.traditionalMode
-                            val transformed = if (text == "র্" && isTraditional) {
-                                BengaliBstiEngine.applyRephReordering(composingBuffer.toString())
-                            } else {
-                                var res = composingBuffer.toString()
-                                var idx = 0
-                                val isMacro = text.length > 1
-                                while (idx < text.length) {
-                                    val cp = text.codePointAt(idx)
-                                    res = BengaliBstiEngine.applyBstiRules(res, cp, isTraditional, isMacro)
-                                    idx += Character.charCount(cp)
+                            if (composingBuffer.isEmpty() || composingCursorOffset == composingBuffer.length) {
+                                composingBuffer.append(text)
+                                val isTraditional = preferencesState.traditionalMode
+                                val transformed = if (text == "র্" && isTraditional) {
+                                    BengaliBstiEngine.applyRephReordering(composingBuffer.toString())
+                                } else {
+                                    var res = composingBuffer.toString()
+                                    var idx = 0
+                                    val isMacro = text.length > 1
+                                    while (idx < text.length) {
+                                        val cp = text.codePointAt(idx)
+                                        res = BengaliBstiEngine.applyBstiRules(res, cp, isTraditional, isMacro)
+                                        idx += Character.charCount(cp)
+                                    }
+                                    res
                                 }
-                                res
+                                composingBuffer.clear()
+                                composingBuffer.append(transformed)
+                                composingCursorOffset = composingBuffer.length
+                                ic.setComposingText(composingBuffer.toString(), 1)
+                            } else {
+                                val (updated, newOffset) = ComposingWordUtils.insertAtCursor(
+                                    composingBuffer.toString(),
+                                    composingCursorOffset,
+                                    text
+                                )
+                                syncComposingTextToEditor(ic, updated, newOffset)
                             }
-                            composingBuffer.clear()
-                            composingBuffer.append(transformed)
-                            ic.setComposingText(composingBuffer.toString(), 1)
                         } else {
                             val cleanWord = BengaliBstiEngine.cleanPending(composingBuffer.toString().trim())
                             if (canLearnFromCurrentEditor() && preferencesState.learnedWordsEnabled && cleanWord.length >= UserDictionaryRepository.MIN_LEARN_LENGTH) {
@@ -1450,26 +1662,34 @@ class KiebordService : InputMethodService() {
                 }
                 // If composing in English, Bengali Probhat or National
                 if (composingBuffer.isNotEmpty()) {
-                    composingBuffer.deleteCharAt(composingBuffer.length - 1)
-                    if (composingBuffer.endsWith("\u200B")) {
-                        composingBuffer.deleteCharAt(composingBuffer.length - 1)
+                    val deletion = ComposingWordUtils.deleteBeforeCursor(
+                        composingBuffer.toString(),
+                        composingCursorOffset
+                    )
+                    if (deletion != null) {
+                        val (updated, newOffset) = deletion
+                        syncComposingTextToEditor(ic, updated, newOffset)
+                        if (PredefinedLayouts.isBornoEasy(activeLayout.id)) {
+                            updateBornoEasyStateFromText(
+                                if (composingBuffer.isNotEmpty()) {
+                                    composingBuffer.substring(0, composingCursorOffset.coerceIn(0, composingBuffer.length))
+                                } else ""
+                            )
+                        }
+                        updateSuggestions()
+                        return
                     }
-                    if (composingBuffer.isEmpty()) {
-                        ic.setComposingText("", 1)
-                        ic.finishComposingText()
-                    } else {
-                        ic.setComposingText(composingBuffer.toString(), 1)
-                    }
-                    if (PredefinedLayouts.isBornoEasy(activeLayout.id)) {
-                        updateBornoEasyStateFromText(composingBuffer.toString())
-                    }
-                    updateSuggestions()
-                    return
+                    // Cursor is at offset 0 of the composing word: finish composing and delete before word.
+                    finishComposing()
                 }
 
                 val textBefore = ic.getTextBeforeCursor(16, 0)
                 val deleteLen = if (!textBefore.isNullOrEmpty()) EmojiSearchCatalog.getDeleteLengthBeforeCursor(textBefore) else 1
                 val deleted = ic.deleteSurroundingText(deleteLen, 0)
+                if (deleted && lastKnownSelStart >= 0 && lastKnownSelStart == lastKnownSelEnd) {
+                    lastKnownSelStart = (lastKnownSelStart - deleteLen).coerceAtLeast(0)
+                    lastKnownSelEnd = lastKnownSelStart
+                }
                 if (!deleted && (InputModeResolver.isDirectCommit(editorInfo) || editorInfo?.inputType == InputType.TYPE_NULL)) {
                     sendNavKeyEvent(ic, KeyEvent.KEYCODE_DEL, isSelecting = false)
                 }
@@ -1477,10 +1697,11 @@ class KiebordService : InputMethodService() {
                     val before = ic.getTextBeforeCursor(10, 0)?.toString() ?: ""
                     updateBornoEasyStateFromText(before)
                 }
+                val recomposed = recomposeWordAtCursor(ic)
                 if (shiftState != ShiftState.CAPS_LOCK) {
                     updateAutoCapitalizationState()
                 }
-                updateSuggestions()
+                updateSuggestions(knownNotInWord = !recomposed)
             }
             KeyType.ACTION -> {
                 finishComposing()
@@ -1560,18 +1781,25 @@ class KiebordService : InputMethodService() {
                     translitMgr.reset()
                     lastSpaceTapTime = SystemClock.uptimeMillis()
                 } else if (composingBuffer.isNotEmpty()) {
-                    val raw = composingBuffer.toString()
-                    val config = resolveSuggestionConfig(activeLayout)
-                    val shortcutMatch = personalDictionaryRepo.getShortcutMatches(raw, config.dictLang).firstOrNull()?.word
-                    val committed = shortcutMatch ?: BengaliBstiEngine.cleanPending(raw)
-                    val cleanCommitted = committed.trim()
-                    if (canLearnFromCurrentEditor() && preferencesState.learnedWordsEnabled && cleanCommitted.length >= UserDictionaryRepository.MIN_LEARN_LENGTH) {
-                        val prevWord = getPrecedingWord(excludeComposing = true).takeIf { it.isNotBlank() }
-                        userDictionaryRepo.recordWord(cleanCommitted, prevWord)
+                    if (composingCursorOffset < composingBuffer.length) {
+                        // Mid-word space splits the word at the cursor without replacing the whole word.
+                        finishComposing()
+                        ic.commitText(" ", 1)
+                        lastSpaceTapTime = SystemClock.uptimeMillis()
+                    } else {
+                        val raw = composingBuffer.toString()
+                        val config = resolveSuggestionConfig(activeLayout)
+                        val shortcutMatch = personalDictionaryRepo.getShortcutMatches(raw, config.dictLang).firstOrNull()?.word
+                        val committed = shortcutMatch ?: BengaliBstiEngine.cleanPending(raw)
+                        val cleanCommitted = committed.trim()
+                        if (canLearnFromCurrentEditor() && preferencesState.learnedWordsEnabled && cleanCommitted.length >= UserDictionaryRepository.MIN_LEARN_LENGTH) {
+                            val prevWord = getPrecedingWord(excludeComposing = true).takeIf { it.isNotBlank() }
+                            userDictionaryRepo.recordWord(cleanCommitted, prevWord)
+                        }
+                        ic.commitText(committed + " ", 1)
+                        clearComposingState()
+                        lastSpaceTapTime = SystemClock.uptimeMillis()
                     }
-                    ic.commitText(committed + " ", 1)
-                    composingBuffer.clear()
-                    lastSpaceTapTime = SystemClock.uptimeMillis()
                 } else {
                     val now = SystemClock.uptimeMillis()
 
@@ -1848,7 +2076,7 @@ class KiebordService : InputMethodService() {
         if (isTransliterationLayout()) {
             getTransliterationManager().reset()
         }
-        composingBuffer.clear()
+        clearComposingState()
         lastGestureCommittedWord = ""
         updateSuggestions()
     }
@@ -1884,21 +2112,24 @@ class KiebordService : InputMethodService() {
 
         // 4. Standard composing buffer
         if (composingBuffer.isNotEmpty()) {
-            composingBuffer.deleteCharAt(composingBuffer.length - 1)
-            if (composingBuffer.isEmpty()) {
-                ic.setComposingText("", 1)
-                ic.finishComposingText()
-            } else {
-                ic.setComposingText(composingBuffer.toString(), 1)
+            val deletion = ComposingWordUtils.deleteBeforeCursor(
+                composingBuffer.toString(),
+                composingCursorOffset
+            )
+            if (deletion != null) {
+                val (updated, newOffset) = deletion
+                syncComposingTextToEditor(ic, updated, newOffset)
+                updateSuggestions()
+                return
             }
-            updateSuggestions()
-            return
+            finishComposing()
         }
 
         // 5. Normal continuous deletion
         val textBefore = ic.getTextBeforeCursor(16, 0)
         val deleteLen = if (!textBefore.isNullOrEmpty()) EmojiSearchCatalog.getDeleteLengthBeforeCursor(textBefore) else 1
         ic.deleteSurroundingText(deleteLen, 0)
+        recomposeWordAtCursor(ic)
         updateSuggestions()
     }
 
@@ -2587,6 +2818,21 @@ class KiebordService : InputMethodService() {
                 true
             }
         }
+        if (!isSelecting && moved) {
+            when (action) {
+                TextAction.MOVE_LEFT,
+                TextAction.MOVE_RIGHT,
+                TextAction.MOVE_UP,
+                TextAction.MOVE_DOWN,
+                TextAction.WORD_LEFT,
+                TextAction.WORD_RIGHT,
+                TextAction.LINE_START,
+                TextAction.LINE_END,
+                TextAction.DELETE_BACKWARD,
+                TextAction.DELETE_FORWARD -> recomposeWordAtCursor(ic)
+                else -> Unit
+            }
+        }
         updateSuggestions()
         return moved
     }
@@ -2675,11 +2921,20 @@ class KiebordService : InputMethodService() {
             else activeLayout.id.substringBefore('_')
         }
         val prefAutoSpaceEnabled = preferencesState.isAutoSpaceAfterSuggestionEnabled(activeLang)
+        val remainingInComposing = if (composingBuffer.isNotEmpty()) {
+            (composingBuffer.length - composingCursorOffset.coerceIn(0, composingBuffer.length)).coerceAtLeast(0)
+        } else 0
+        val rawAfterCursor = ic.getTextAfterCursor(remainingInComposing + 1, 0)
+        val textAfterWord = if (composingBuffer.isNotEmpty()) {
+            ComposingWordUtils.textAfterComposingWord(rawAfterCursor, composingBuffer.length, composingCursorOffset)
+        } else {
+            rawAfterCursor
+        }
         val shouldInsertSpace = AutoSpaceUtils.shouldAutoSpaceAfterSuggestion(
             isPreferenceEnabled = prefAutoSpaceEnabled,
             layoutNoAutoSpace = activeLayout.noAutoSpace || primaryAlphaLayout.noAutoSpace,
             candidateText = candidateText,
-            textAfterCursor = ic.getTextAfterCursor(1, 0)
+            textAfterCursor = textAfterWord
         )
         val textToCommit = if (shouldInsertSpace) "$candidateText " else candidateText
 
@@ -2689,7 +2944,7 @@ class KiebordService : InputMethodService() {
                 translitMgr.commitCustom(textToCommit)
             } else {
                 ic.commitText(textToCommit, 1)
-                composingBuffer.clear()
+                clearComposingState()
             }
             serviceScope.launch { preferencesRepo.recordRecentEmoji(candidateText) }
             if (shiftState == ShiftState.ONE_SHOT) {
@@ -2742,10 +2997,11 @@ class KiebordService : InputMethodService() {
         } else if (composingBuffer.isNotEmpty()) {
             if (prefAutoSpaceEnabled) {
                 ic.commitText(textToCommit, 1)
-                composingBuffer.clear()
+                clearComposingState()
             } else {
                 composingBuffer.clear()
                 composingBuffer.append(candidateText)
+                composingCursorOffset = composingBuffer.length
                 ic.setComposingText(composingBuffer.toString(), 1)
             }
         } else {
@@ -2754,6 +3010,7 @@ class KiebordService : InputMethodService() {
             } else {
                 composingBuffer.clear()
                 composingBuffer.append(candidateText)
+                composingCursorOffset = composingBuffer.length
                 ic.setComposingText(composingBuffer.toString(), 1)
             }
         }
@@ -2993,7 +3250,7 @@ class KiebordService : InputMethodService() {
         })
     }
 
-    private fun updateSuggestions() {
+    private fun updateSuggestions(knownNotInWord: Boolean = false) {
         val editorInfo = currentEditorInfoState ?: currentInputEditorInfo
         if (!preferencesState.suggestionsEnabled || activeLayout.noSuggestions || primaryAlphaLayout.noSuggestions ||
             !NativeEngine.isAvailable() || isSymbolsMode || PredefinedLayouts.isNumberLayout(activeLayout.id) ||
@@ -3150,8 +3407,20 @@ class KiebordService : InputMethodService() {
 
                 insertEmojiSuggestions(list, raw)
                 activeSuggestions = filterAndMarkCandidates(list.take(12))
-            } else {
-                if (!preferencesState.nextWordPrediction || hasDoubleOrGreaterSpacing()) {
+                return
+            } else if (composingBuffer.isEmpty()) {
+                val notInWord = if (knownNotInWord) {
+                    true
+                } else {
+                    val ic = currentInputConnection
+                    val textBefore = ic?.getTextBeforeCursor(2, 0)?.toString() ?: ""
+                    val textAfter = ic?.getTextAfterCursor(2, 0)?.toString() ?: ""
+                    ComposingWordUtils.shouldPredictNextWord(textBefore, textAfter, ::isRecomposableWordChar)
+                }
+                if (!preferencesState.nextWordPrediction ||
+                    hasDoubleOrGreaterSpacing() ||
+                    !notInWord
+                ) {
                     activeSuggestions = emptyList()
                     return
                 }
@@ -3167,8 +3436,10 @@ class KiebordService : InputMethodService() {
                 activeSuggestions = filterAndMarkCandidates(merged.mapIndexed { idx, word ->
                     SuggestionCandidate(text = word, isPrimary = idx == 0)
                 })
+                return
             }
-            return
+            // When !translitMgr.isComposing && composingBuffer.isNotEmpty(), fall through
+            // to whole-word dictionary suggestions for the re-composed word under the cursor.
         }
 
         val config = resolveSuggestionConfig(activeLayout)
@@ -3226,7 +3497,18 @@ class KiebordService : InputMethodService() {
 
             activeSuggestions = filterAndMarkCandidates(candidateList)
         } else {
-            if (!preferencesState.nextWordPrediction || hasDoubleOrGreaterSpacing()) {
+            val notInWord = if (knownNotInWord) {
+                true
+            } else {
+                val ic = currentInputConnection
+                val textBefore = ic?.getTextBeforeCursor(2, 0)?.toString() ?: ""
+                val textAfter = ic?.getTextAfterCursor(2, 0)?.toString() ?: ""
+                ComposingWordUtils.shouldPredictNextWord(textBefore, textAfter, ::isRecomposableWordChar)
+            }
+            if (!preferencesState.nextWordPrediction ||
+                hasDoubleOrGreaterSpacing() ||
+                !notInWord
+            ) {
                 rawNextWordPredictions = emptyList()
                 nextWordManualShiftActive = false
                 activeSuggestions = emptyList()

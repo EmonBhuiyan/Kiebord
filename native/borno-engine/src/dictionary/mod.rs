@@ -902,6 +902,42 @@ fn test_iphone_casing() {
     }
 
     #[test]
+    fn test_common_english_typos_and_non_neighbor_substitutions() {
+        let dict = get_en_binary_dict().expect("dict loaded");
+        let prox = get_en_proximity();
+
+        let cases = [
+            ("dinosaor", "dinosaur"),
+            ("seperate", "separate"),
+            ("definately", "definitely"),
+            ("becuase", "because"),
+            ("recieve", "receive"),
+            ("occured", "occurred"),
+            ("tomorow", "tomorrow"),
+            ("beleive", "believe"),
+            ("dont", "don't"),
+            ("cant", "can't"),
+            ("wont", "won't"),
+            ("im", "I'm"),
+            ("ive", "I've"),
+            ("youre", "you're"),
+            ("isnt", "isn't"),
+            ("doesnt", "doesn't"),
+        ];
+
+        for (typed, expected) in cases {
+            let sugs = dict.suggest(typed, 5, prox);
+            assert!(
+                sugs.contains(&expected.to_string()),
+                "Expected '{}' in suggestions for '{}', got {:?}",
+                expected,
+                typed,
+                sugs
+            );
+        }
+    }
+
+    #[test]
     fn test_dictionary_metadata_roundtrip_and_assets() {
         let sample = "name=Kiebord Bangla Word Dictionary;author=Jayed Ahsan Saad;version=3;date=1761681600;license=Only for Kiebord;\nword=বাংলা,f=200\nword=ভাষা,f=180\n";
         let parsed = CombinedParser::parse_str(sample);
