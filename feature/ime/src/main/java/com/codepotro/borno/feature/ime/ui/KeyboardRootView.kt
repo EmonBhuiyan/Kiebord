@@ -161,6 +161,9 @@ fun KeyboardRootView(
     onKeyTap: (KeyDef) -> Unit,
     onKeyLongPress: (KeyDef) -> Unit,
     onTextAction: (TextAction, Boolean) -> Boolean = { _, _ -> false },
+    onSpacebarTrackpadStart: () -> Unit = {},
+    onSpacebarTrackpadMove: ((Int) -> Boolean)? = null,
+    onSpacebarTrackpadEnd: () -> Unit = {},
     onThemeToggle: () -> Unit = {},
     onOpenThemeSettings: () -> Unit = onThemeToggle,
     defaultOneHandedMode: String = "OFF",
@@ -2099,15 +2102,27 @@ fun KeyboardRootView(
                                 onKeyPositioned = { _, coords ->
                                     cellCoordinatesMap.put((rowIndex shl 16) or (keyIndex and 0xFFFF), coords)
                                 },
-                                onSpacebarTrackpad = { direction ->
-                                    if (cursorTrackpadEnabled) {
-                                        val didMove = onTextAction(
-                                            if (direction > 0) TextAction.MOVE_RIGHT else TextAction.MOVE_LEFT,
-                                            false
-                                        )
+                                onSpacebarTrackpad = { steps ->
+                                    if (cursorTrackpadEnabled && steps != 0) {
+                                        onSpacebarTrackpadStart()
+                                        val didMove = if (onSpacebarTrackpadMove != null) {
+                                            onSpacebarTrackpadMove(steps)
+                                        } else {
+                                            val action = if (steps > 0) TextAction.MOVE_RIGHT else TextAction.MOVE_LEFT
+                                            var movedAny = false
+                                            repeat(Math.abs(steps)) {
+                                                if (onTextAction(action, false)) movedAny = true
+                                            }
+                                            movedAny
+                                        }
                                         if (didMove) {
                                             performHaptic(HapticFeedbackType.TextHandleMove)
                                         }
+                                    }
+                                },
+                                onSpacebarTrackpadEnd = {
+                                    if (cursorTrackpadEnabled) {
+                                        onSpacebarTrackpadEnd()
                                     }
                                 },
                                 onShowMoreKeys = handleShowMoreKeys,

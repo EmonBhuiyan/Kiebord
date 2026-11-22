@@ -91,8 +91,14 @@ class KiebordService : InputMethodService() {
     private val composingBuffer = StringBuilder()
     private var composingCursorOffset: Int = 0
     private var composingStartOffset: Int = -1
+    private var pendingComposingStart: Int = -1
+    private var pendingComposingEnd: Int = -1
+    private var pendingComposingSel: Int = -1
     private var lastKnownSelStart: Int = -1
     private var lastKnownSelEnd: Int = -1
+    private var isSpacebarTrackpadActive: Boolean = false
+    private var suppressRecomposeUntilMs: Long = 0L
+    private var cursorMoveRecomposeJob: kotlinx.coroutines.Job? = null
     private val gestureDecoder = CrossLanguageGestureDecoder()
     private var lastGestureCommittedWord: String = ""
     private var isGestureAlternativeActive: Boolean = false
@@ -576,6 +582,9 @@ class KiebordService : InputMethodService() {
                     onKeyTap = ::handleKeyTap,
                     onKeyLongPress = ::handleKeyLongPress,
                     onTextAction = ::handleTextAction,
+                    onSpacebarTrackpadStart = ::handleSpacebarTrackpadStart,
+                    onSpacebarTrackpadMove = ::handleSpacebarTrackpadMove,
+                    onSpacebarTrackpadEnd = ::handleSpacebarTrackpadEnd,
                     suggestions = activeSuggestions,
                     suggestionBarMode = preferencesState.suggestionBarMode,
                     onCandidateSelect = ::handleCandidateSelect,
@@ -819,6 +828,10 @@ class KiebordService : InputMethodService() {
         }
         getTransliterationManager().reset()
         clearComposingState()
+        isSpacebarTrackpadActive = false
+        cursorMoveRecomposeJob?.cancel()
+        cursorMoveRecomposeJob = null
+        suppressRecomposeUntilMs = 0L
         lastKnownSelStart = info?.initialSelStart ?: -1
         lastKnownSelEnd = info?.initialSelEnd ?: -1
         lastGestureCommittedWord = ""
@@ -860,6 +873,10 @@ class KiebordService : InputMethodService() {
         val isPassOrPin = InputModeResolver.isPasswordField(info) ||
                 InputModeResolver.isDirectCommit(info) ||
                 PredefinedLayouts.isNumberLayout(activeLayout.id)
+
+        if (isSpacebarTrackpadActive || SystemClock.uptimeMillis() < suppressRecomposeUntilMs) {
+            return
+        }
 
         if (translitMgr.isComposing) {
             // For active phonetic/m17n transliteration, moving away from candidatesEnd commits it.
@@ -905,6 +922,9 @@ class KiebordService : InputMethodService() {
                     newSelStart in candidatesStart..candidatesEnd
 
             if (cursorInsideComposing) {
+                pendingComposingStart = -1
+                pendingComposingEnd = -1
+                pendingComposingSel = -1
                 composingStartOffset = candidatesStart
                 val spanLen = candidatesEnd - candidatesStart
                 if (spanLen == composingBuffer.length) {
@@ -925,8 +945,36 @@ class KiebordService : InputMethodService() {
                 return
             }
 
+            // Guard against in-flight onUpdateSelection(-1, -1) callbacks or editors that
+            // don't echo candidatesStart back after setComposingRegion.
+            if (newSelStart == newSelEnd && candidatesStart < 0 && candidatesEnd < 0) {
+                if (pendingComposingStart >= 0 && newSelStart == pendingComposingSel) {
+                    return
+                }
+                val composingEndOffset = composingStartOffset + composingBuffer.length
+                if (composingStartOffset >= 0 && newSelStart in composingStartOffset..composingEndOffset) {
+                    composingCursorOffset = (newSelStart - composingStartOffset).coerceIn(0, composingBuffer.length)
+                    if (pendingComposingStart < 0) {
+                        val ok = try {
+                            ic?.setComposingRegion(composingStartOffset, composingEndOffset) ?: false
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (ok) {
+                            pendingComposingStart = composingStartOffset
+                            pendingComposingEnd = composingEndOffset
+                            pendingComposingSel = newSelStart
+                        }
+                    }
+                    if (!isPassOrPin && activeSuggestions.isEmpty()) {
+                        updateSuggestions()
+                    }
+                    return
+                }
+            }
+
             // Cursor moved outside the active composing region, selection became non-empty,
-            // or the host editor cleared the composing span.
+            // or the host editor invalidated the composing span.
             val wordToLearn = BengaliBstiEngine.cleanPending(composingBuffer.toString()).trim()
             if (canLearnFromCurrentEditor() && wordToLearn.length >= UserDictionaryRepository.MIN_LEARN_LENGTH) {
                 val prevWord = getPrecedingWord(excludeComposing = true).takeIf { it.isNotBlank() }
@@ -937,10 +985,20 @@ class KiebordService : InputMethodService() {
             lastGestureCommittedWord = ""
             isGestureAlternativeActive = false
 
-            ic?.finishComposingText()
+            val collapsed = newSelStart == newSelEnd
+            var recomposed = false
+            ic?.beginBatchEdit()
+            try {
+                if (candidatesStart >= 0 && candidatesEnd > candidatesStart) {
+                    ic?.finishComposingText()
+                }
+                if (!isPassOrPin && collapsed) {
+                    recomposed = recomposeWordAtCursor(ic, newSelStart, newSelEnd)
+                }
+            } finally {
+                ic?.endBatchEdit()
+            }
             if (!isPassOrPin) {
-                val collapsed = newSelStart == newSelEnd
-                val recomposed = if (collapsed) recomposeWordAtCursor(ic, newSelStart, newSelEnd) else false
                 if (shiftState != ShiftState.CAPS_LOCK) {
                     updateAutoCapitalizationState()
                 }
@@ -971,6 +1029,10 @@ class KiebordService : InputMethodService() {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        isSpacebarTrackpadActive = false
+        cursorMoveRecomposeJob?.cancel()
+        cursorMoveRecomposeJob = null
+        suppressRecomposeUntilMs = 0L
         finishComposing()
         lastKnownSelStart = -1
         lastKnownSelEnd = -1
@@ -1150,6 +1212,9 @@ class KiebordService : InputMethodService() {
         composingBuffer.clear()
         composingCursorOffset = 0
         composingStartOffset = -1
+        pendingComposingStart = -1
+        pendingComposingEnd = -1
+        pendingComposingSel = -1
     }
 
     private fun isComposingAllowedForCurrentEditor(): Boolean {
@@ -1218,6 +1283,9 @@ class KiebordService : InputMethodService() {
             composingBuffer.append(around.word)
             composingCursorOffset = around.charsBeforeCursor
             composingStartOffset = wordStart
+            pendingComposingStart = wordStart
+            pendingComposingEnd = wordEnd
+            pendingComposingSel = cursorPos
             return true
         }
         return false
@@ -1352,6 +1420,10 @@ class KiebordService : InputMethodService() {
     }
 
     private fun handleKeyTap(key: KeyDef) {
+        isSpacebarTrackpadActive = false
+        cursorMoveRecomposeJob?.cancel()
+        cursorMoveRecomposeJob = null
+        suppressRecomposeUntilMs = 0L
         if (::voiceInputManager.isInitialized && voiceInputManager.isListening) {
             voiceInputManager.stop()
         }
@@ -2321,86 +2393,229 @@ class KiebordService : InputMethodService() {
                c == '-' || c == '+' || c == '=' || c == '|' || c == '~'
     }
 
+    private fun handleSpacebarTrackpadStart() {
+        if (!isSpacebarTrackpadActive) {
+            isSpacebarTrackpadActive = true
+            cursorMoveRecomposeJob?.cancel()
+            cursorMoveRecomposeJob = null
+            suppressRecomposeUntilMs = 0L
+            finishComposing()
+        }
+    }
+
+    private fun handleSpacebarTrackpadMove(steps: Int): Boolean {
+        if (steps == 0) return false
+        val ic = currentInputConnection ?: return false
+        handleSpacebarTrackpadStart()
+
+        val absSteps = kotlin.math.abs(steps)
+        if (lastKnownSelStart >= 0 && lastKnownSelStart == lastKnownSelEnd) {
+            selectionAnchor = null
+            selectionCursor = null
+            if (steps < 0) {
+                if (lastKnownSelStart <= 0) return false
+                val before = ic.getTextBeforeCursor(absSteps * 2, 0)?.toString() ?: ""
+                if (before.isEmpty()) return false
+                var idx = before.length
+                var remaining = absSteps
+                while (remaining > 0 && idx > 0) {
+                    val cp = Character.codePointBefore(before, idx)
+                    idx -= Character.charCount(cp)
+                    remaining--
+                }
+                val charDelta = before.length - idx
+                if (charDelta <= 0) return false
+                val newPos = (lastKnownSelStart - charDelta).coerceAtLeast(0)
+                lastKnownSelStart = newPos
+                lastKnownSelEnd = newPos
+                ic.setSelection(newPos, newPos)
+                return true
+            } else {
+                val after = ic.getTextAfterCursor(absSteps * 2, 0)?.toString() ?: ""
+                if (after.isEmpty()) return false
+                var idx = 0
+                var remaining = absSteps
+                while (remaining > 0 && idx < after.length) {
+                    val cp = Character.codePointAt(after, idx)
+                    idx += Character.charCount(cp)
+                    remaining--
+                }
+                if (idx <= 0) return false
+                val newPos = lastKnownSelEnd + idx
+                lastKnownSelStart = newPos
+                lastKnownSelEnd = newPos
+                ic.setSelection(newPos, newPos)
+                return true
+            }
+        }
+
+        val action = if (steps > 0) TextAction.MOVE_RIGHT else TextAction.MOVE_LEFT
+        var movedAny = false
+        repeat(absSteps) {
+            if (handleTextAction(action, isSelecting = false)) movedAny = true
+        }
+        return movedAny
+    }
+
+    private fun handleSpacebarTrackpadEnd() {
+        if (!isSpacebarTrackpadActive) return
+        isSpacebarTrackpadActive = false
+        suppressRecomposeUntilMs = 0L
+        cursorMoveRecomposeJob?.cancel()
+        cursorMoveRecomposeJob = null
+        val ic = currentInputConnection ?: return
+        val info = currentEditorInfoState ?: currentInputEditorInfo
+        val isPassOrPin = InputModeResolver.isPasswordField(info) ||
+                InputModeResolver.isDirectCommit(info) ||
+                PredefinedLayouts.isNumberLayout(activeLayout.id)
+        if (!isPassOrPin && lastKnownSelStart >= 0 && lastKnownSelStart == lastKnownSelEnd) {
+            val recomposed = recomposeWordAtCursor(ic, lastKnownSelStart, lastKnownSelEnd)
+            if (shiftState != ShiftState.CAPS_LOCK) {
+                updateAutoCapitalizationState()
+            }
+            updateSuggestions(knownNotInWord = !recomposed)
+        }
+    }
+
     private fun handleTextAction(action: TextAction, isSelecting: Boolean): Boolean {
         val ic = currentInputConnection ?: return false
-        finishComposing()
+        val isCursorMoveOnly = !isSelecting && when (action) {
+            TextAction.MOVE_LEFT,
+            TextAction.MOVE_RIGHT,
+            TextAction.MOVE_UP,
+            TextAction.MOVE_DOWN,
+            TextAction.WORD_LEFT,
+            TextAction.WORD_RIGHT,
+            TextAction.LINE_START,
+            TextAction.LINE_END -> true
+            else -> false
+        }
+        if (isCursorMoveOnly) {
+            if (!isSpacebarTrackpadActive) {
+                // Discrete cursor move (arrow / volume keys): suppress composing briefly.
+                cursorMoveRecomposeJob?.cancel()
+                cursorMoveRecomposeJob = null
+                suppressRecomposeUntilMs = SystemClock.uptimeMillis() + 300L
+                finishComposing()
+            }
+        } else {
+            finishComposing()
+        }
 
         val moved: Boolean = when (action) {
             TextAction.MOVE_LEFT -> {
-                val extracted = ic.getExtractedText(ExtractedTextRequest(), 0)
-                if (extracted != null && extracted.text != null) {
-                    val textLen = extracted.text.length
-                    val start = extracted.selectionStart.coerceIn(0, textLen)
-                    val end = extracted.selectionEnd.coerceIn(0, textLen)
-                    if (isSelecting) {
-                        val anchor = selectionAnchor ?: start
-                        val cur = selectionCursor ?: if (start == end) start else if (anchor == start) end else start
-                        if (cur <= 0) {
-                            false
-                        } else {
-                            val newCur = (cur - 1).coerceIn(0, textLen)
-                            selectionAnchor = anchor
-                            selectionCursor = newCur
-                            ic.setSelection(minOf(anchor, newCur), maxOf(anchor, newCur))
-                            true
-                        }
-                    } else {
-                        selectionAnchor = null
-                        selectionCursor = null
-                        if (start <= 0 && end <= 0) {
-                            false
-                        } else {
-                            val newPos = if (start != end) start else (start - 1).coerceIn(0, textLen)
-                            ic.setSelection(newPos, newPos)
-                            true
-                        }
-                    }
-                } else {
-                    val before = ic.getTextBeforeCursor(1, 0)
-                    if (before.isNullOrEmpty()) {
+                if (!isSelecting && lastKnownSelStart >= 0 && lastKnownSelStart == lastKnownSelEnd) {
+                    selectionAnchor = null
+                    selectionCursor = null
+                    if (lastKnownSelStart <= 0) {
                         false
                     } else {
-                        sendNavKeyEvent(ic, KeyEvent.KEYCODE_DPAD_LEFT, isSelecting)
+                        val before = ic.getTextBeforeCursor(2, 0)
+                        val step = if (before != null && before.length >= 2 &&
+                            Character.isSurrogatePair(before[before.length - 2], before[before.length - 1])
+                        ) 2 else 1
+                        val newPos = (lastKnownSelStart - step).coerceAtLeast(0)
+                        lastKnownSelStart = newPos
+                        lastKnownSelEnd = newPos
+                        ic.setSelection(newPos, newPos)
                         true
+                    }
+                } else {
+                    val extracted = ic.getExtractedText(ExtractedTextRequest(), 0)
+                    if (extracted != null && extracted.text != null) {
+                        val textLen = extracted.text.length
+                        val start = extracted.selectionStart.coerceIn(0, textLen)
+                        val end = extracted.selectionEnd.coerceIn(0, textLen)
+                        if (isSelecting) {
+                            val anchor = selectionAnchor ?: start
+                            val cur = selectionCursor ?: if (start == end) start else if (anchor == start) end else start
+                            if (cur <= 0) {
+                                false
+                            } else {
+                                val newCur = (cur - 1).coerceIn(0, textLen)
+                                selectionAnchor = anchor
+                                selectionCursor = newCur
+                                ic.setSelection(minOf(anchor, newCur), maxOf(anchor, newCur))
+                                true
+                            }
+                        } else {
+                            selectionAnchor = null
+                            selectionCursor = null
+                            if (start <= 0 && end <= 0) {
+                                false
+                            } else {
+                                val newPos = if (start != end) start else (start - 1).coerceIn(0, textLen)
+                                lastKnownSelStart = newPos
+                                lastKnownSelEnd = newPos
+                                ic.setSelection(newPos, newPos)
+                                true
+                            }
+                        }
+                    } else {
+                        val before = ic.getTextBeforeCursor(1, 0)
+                        if (before.isNullOrEmpty()) {
+                            false
+                        } else {
+                            sendNavKeyEvent(ic, KeyEvent.KEYCODE_DPAD_LEFT, isSelecting)
+                            true
+                        }
                     }
                 }
             }
             TextAction.MOVE_RIGHT -> {
-                val extracted = ic.getExtractedText(ExtractedTextRequest(), 0)
-                if (extracted != null && extracted.text != null) {
-                    val textLen = extracted.text.length
-                    val start = extracted.selectionStart.coerceIn(0, textLen)
-                    val end = extracted.selectionEnd.coerceIn(0, textLen)
-                    if (isSelecting) {
-                        val anchor = selectionAnchor ?: start
-                        val cur = selectionCursor ?: if (start == end) end else if (anchor == end) start else end
-                        if (cur >= textLen) {
-                            false
-                        } else {
-                            val newCur = (cur + 1).coerceIn(0, textLen)
-                            selectionAnchor = anchor
-                            selectionCursor = newCur
-                            ic.setSelection(minOf(anchor, newCur), maxOf(anchor, newCur))
-                            true
-                        }
-                    } else {
-                        selectionAnchor = null
-                        selectionCursor = null
-                        if (start >= textLen && end >= textLen) {
-                            false
-                        } else {
-                            val newPos = if (start != end) end else (end + 1).coerceIn(0, textLen)
-                            ic.setSelection(newPos, newPos)
-                            true
-                        }
-                    }
-                } else {
-                    val after = ic.getTextAfterCursor(1, 0)
+                if (!isSelecting && lastKnownSelStart >= 0 && lastKnownSelStart == lastKnownSelEnd) {
+                    selectionAnchor = null
+                    selectionCursor = null
+                    val after = ic.getTextAfterCursor(2, 0)
                     if (after.isNullOrEmpty()) {
                         false
                     } else {
-                        sendNavKeyEvent(ic, KeyEvent.KEYCODE_DPAD_RIGHT, isSelecting)
+                        val step = if (after.length >= 2 && Character.isSurrogatePair(after[0], after[1])) 2 else 1
+                        val newPos = lastKnownSelEnd + step
+                        lastKnownSelStart = newPos
+                        lastKnownSelEnd = newPos
+                        ic.setSelection(newPos, newPos)
                         true
+                    }
+                } else {
+                    val extracted = ic.getExtractedText(ExtractedTextRequest(), 0)
+                    if (extracted != null && extracted.text != null) {
+                        val textLen = extracted.text.length
+                        val start = extracted.selectionStart.coerceIn(0, textLen)
+                        val end = extracted.selectionEnd.coerceIn(0, textLen)
+                        if (isSelecting) {
+                            val anchor = selectionAnchor ?: start
+                            val cur = selectionCursor ?: if (start == end) end else if (anchor == end) start else end
+                            if (cur >= textLen) {
+                                false
+                            } else {
+                                val newCur = (cur + 1).coerceIn(0, textLen)
+                                selectionAnchor = anchor
+                                selectionCursor = newCur
+                                ic.setSelection(minOf(anchor, newCur), maxOf(anchor, newCur))
+                                true
+                            }
+                        } else {
+                            selectionAnchor = null
+                            selectionCursor = null
+                            if (start >= textLen && end >= textLen) {
+                                false
+                            } else {
+                                val newPos = if (start != end) end else (end + 1).coerceIn(0, textLen)
+                                lastKnownSelStart = newPos
+                                lastKnownSelEnd = newPos
+                                ic.setSelection(newPos, newPos)
+                                true
+                            }
+                        }
+                    } else {
+                        val after = ic.getTextAfterCursor(1, 0)
+                        if (after.isNullOrEmpty()) {
+                            false
+                        } else {
+                            sendNavKeyEvent(ic, KeyEvent.KEYCODE_DPAD_RIGHT, isSelecting)
+                            true
+                        }
                     }
                 }
             }
@@ -2818,22 +3033,28 @@ class KiebordService : InputMethodService() {
                 true
             }
         }
-        if (!isSelecting && moved) {
-            when (action) {
-                TextAction.MOVE_LEFT,
-                TextAction.MOVE_RIGHT,
-                TextAction.MOVE_UP,
-                TextAction.MOVE_DOWN,
-                TextAction.WORD_LEFT,
-                TextAction.WORD_RIGHT,
-                TextAction.LINE_START,
-                TextAction.LINE_END,
-                TextAction.DELETE_BACKWARD,
-                TextAction.DELETE_FORWARD -> recomposeWordAtCursor(ic)
-                else -> Unit
+        if (isCursorMoveOnly) {
+            if (moved && !isSpacebarTrackpadActive) {
+                cursorMoveRecomposeJob = serviceScope.launch {
+                    delay(300L)
+                    suppressRecomposeUntilMs = 0L
+                    val currentIc = currentInputConnection ?: return@launch
+                    val info = currentEditorInfoState ?: currentInputEditorInfo
+                    val isPassOrPin = InputModeResolver.isPasswordField(info) ||
+                            InputModeResolver.isDirectCommit(info) ||
+                            PredefinedLayouts.isNumberLayout(activeLayout.id)
+                    if (!isPassOrPin && lastKnownSelStart >= 0 && lastKnownSelStart == lastKnownSelEnd) {
+                        val recomposed = recomposeWordAtCursor(currentIc, lastKnownSelStart, lastKnownSelEnd)
+                        if (shiftState != ShiftState.CAPS_LOCK) {
+                            updateAutoCapitalizationState()
+                        }
+                        updateSuggestions(knownNotInWord = !recomposed)
+                    }
+                }
             }
+        } else {
+            updateSuggestions()
         }
-        updateSuggestions()
         return moved
     }
 

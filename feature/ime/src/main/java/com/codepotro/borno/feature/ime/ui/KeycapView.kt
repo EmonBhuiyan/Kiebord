@@ -116,6 +116,7 @@ fun KeycapView(
     onSlidingDragMove: (Offset) -> Unit = {},
     onSlidingDragEnd: (Offset) -> Unit = {},
     onSpacebarTrackpad: (Int) -> Unit = {},
+    onSpacebarTrackpadEnd: () -> Unit = {},
     onSpacebarSwipeMove: (Float) -> Unit = {},
     onSpacebarSwipeEnd: (Float) -> Unit = {},
     onSpacebarDwellReady: () -> Unit = {},
@@ -210,6 +211,7 @@ fun KeycapView(
     val currentOnSlidingMove = rememberUpdatedState(onSlidingDragMove)
     val currentOnSlidingEnd = rememberUpdatedState(onSlidingDragEnd)
     val currentOnSpacebarTrackpad = rememberUpdatedState(onSpacebarTrackpad)
+    val currentOnSpacebarTrackpadEnd = rememberUpdatedState(onSpacebarTrackpadEnd)
     val currentOnSpacebarSwipeMove = rememberUpdatedState(onSpacebarSwipeMove)
     val currentOnSpacebarSwipeEnd = rememberUpdatedState(onSpacebarSwipeEnd)
     val currentOnSpacebarDwellReady = rememberUpdatedState(onSpacebarDwellReady)
@@ -258,7 +260,10 @@ fun KeycapView(
                             val fastDeleteCancelThresholdPx = with(density) { 20.dp.toPx() }
                             var gestureEnded = false
                             var lastTrackpadX = 0f
-                            val trackpadStepPx = with(density) { 14.dp.toPx() }
+                            var lastTrackpadEventX = 0f
+                            var lastTrackpadEventTimeMs = down.uptimeMillis
+                            var smoothedTrackpadVelocity = 0f
+                            val trackpadBaseStepPx = with(density) { 15.dp.toPx() }
 
                             val isSlidingInitiator = initialKey.slidingInput || initialKey.type == KeyType.SHIFT || isSymbolsToggleKey
 
@@ -401,12 +406,35 @@ fun KeycapView(
                             // 1. Swiping immediately (before 220ms dwell) triggers active layout sliding switch!
                             // 2. Holding still for 220ms (dwell ready) then sliding left/right activates cursor movement!
                             if (initialKey.type == KeyType.SPACE) {
+                                val nowMs = change.uptimeMillis
+                                val rawDt = nowMs - lastTrackpadEventTimeMs
+                                val dxEvent = Math.abs(delta.x - lastTrackpadEventX)
+                                if (dxEvent > 0.5f) {
+                                    val dt = rawDt.coerceIn(4L, 50L).toFloat()
+                                    val instVelocity = dxEvent / dt // px per ms
+                                    smoothedTrackpadVelocity = if (smoothedTrackpadVelocity == 0f) {
+                                        instVelocity
+                                    } else {
+                                        smoothedTrackpadVelocity * 0.45f + instVelocity * 0.55f
+                                    }
+                                    lastTrackpadEventX = delta.x
+                                    lastTrackpadEventTimeMs = nowMs
+                                } else if (rawDt > 80L) {
+                                    smoothedTrackpadVelocity = 0f
+                                    lastTrackpadEventTimeMs = nowMs
+                                }
+                                val velocityDpPerMs = smoothedTrackpadVelocity / density.density.coerceAtLeast(1f)
+                                // Velocity-based step scaling (Borno Classic style, density-independent):
+                                // slow (~0 dp/ms) -> ~18 dp/char; fast (>=1.2 dp/ms) -> ~5.25 dp/char
+                                val velocityScale = (1.2f - velocityDpPerMs * 0.7f).coerceIn(0.35f, 1.35f)
+                                val dynamicStepPx = (trackpadBaseStepPx * velocityScale).coerceAtLeast(1f)
+
                                 val isSwipeCursorMode = currentSpacebarSwipeMode.value == KiebordPreferences.SPACEBAR_MODE_SWIPE_CURSOR_HOLD_LAYOUT
                                 if (!isSpacebarDwellReady) {
                                     if (isSwipeCursorMode) {
                                         if (currentCursorTrackpadEnabled.value) {
                                             val diffFromLast = delta.x - lastTrackpadX
-                                            if (isSpacebarTrackpadActive || Math.abs(diffFromLast) > trackpadStepPx) {
+                                            if (isSpacebarTrackpadActive || Math.abs(diffFromLast) > dynamicStepPx) {
                                                 if (!isSpacebarTrackpadActive) {
                                                     spacebarDwellJob?.cancel()
                                                     longPressJob?.cancel()
@@ -414,18 +442,14 @@ fun KeycapView(
                                                     isPressed = false
                                                 }
                                                 change.consume()
-                                                if (diffFromLast > trackpadStepPx) {
-                                                    val steps = (diffFromLast / trackpadStepPx).toInt()
-                                                    lastTrackpadX += steps * trackpadStepPx
-                                                    repeat(steps) {
-                                                        currentOnSpacebarTrackpad.value(1)
-                                                    }
-                                                } else if (diffFromLast < -trackpadStepPx) {
-                                                    val steps = ((lastTrackpadX - delta.x) / trackpadStepPx).toInt()
-                                                    lastTrackpadX -= steps * trackpadStepPx
-                                                    repeat(steps) {
-                                                        currentOnSpacebarTrackpad.value(-1)
-                                                    }
+                                                if (diffFromLast > dynamicStepPx) {
+                                                    val steps = (diffFromLast / dynamicStepPx).toInt()
+                                                    lastTrackpadX += steps * dynamicStepPx
+                                                    currentOnSpacebarTrackpad.value(steps)
+                                                } else if (diffFromLast < -dynamicStepPx) {
+                                                    val steps = ((lastTrackpadX - delta.x) / dynamicStepPx).toInt()
+                                                    lastTrackpadX -= steps * dynamicStepPx
+                                                    currentOnSpacebarTrackpad.value(-steps)
                                                 }
                                             }
                                         }
@@ -464,20 +488,16 @@ fun KeycapView(
                                     } else if (currentCursorTrackpadEnabled.value) {
                                         change.consume()
                                         val diffFromLast = delta.x - lastTrackpadX
-                                        if (diffFromLast > trackpadStepPx) {
+                                        if (diffFromLast > dynamicStepPx) {
                                             isSpacebarTrackpadActive = true
-                                            val steps = (diffFromLast / trackpadStepPx).toInt()
-                                            lastTrackpadX += steps * trackpadStepPx
-                                            repeat(steps) {
-                                                currentOnSpacebarTrackpad.value(1)
-                                            }
-                                        } else if (diffFromLast < -trackpadStepPx) {
+                                            val steps = (diffFromLast / dynamicStepPx).toInt()
+                                            lastTrackpadX += steps * dynamicStepPx
+                                            currentOnSpacebarTrackpad.value(steps)
+                                        } else if (diffFromLast < -dynamicStepPx) {
                                             isSpacebarTrackpadActive = true
-                                            val steps = ((lastTrackpadX - delta.x) / trackpadStepPx).toInt()
-                                            lastTrackpadX -= steps * trackpadStepPx
-                                            repeat(steps) {
-                                                currentOnSpacebarTrackpad.value(-1)
-                                            }
+                                            val steps = ((lastTrackpadX - delta.x) / dynamicStepPx).toInt()
+                                            lastTrackpadX -= steps * dynamicStepPx
+                                            currentOnSpacebarTrackpad.value(-steps)
                                         }
                                     }
                                 }
@@ -547,6 +567,10 @@ fun KeycapView(
                             } finally {
                                 spacebarDwellJob?.cancel()
                                 longPressJob?.cancel()
+                                if (isSpacebarTrackpadActive) {
+                                    isSpacebarTrackpadActive = false
+                                    currentOnSpacebarTrackpadEnd.value()
+                                }
                                 if (isGestureTyping && !gestureEnded) {
                                     gestureEnded = true
                                     currentOnGestureEnd.value()
