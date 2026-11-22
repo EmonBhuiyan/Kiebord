@@ -58,6 +58,7 @@ import com.codepotro.borno.data.prefs.KiebordPreferences
 import com.codepotro.borno.data.prefs.KiebordPreferencesRepository
 import com.codepotro.borno.feature.ime.translit.TransliterationManagerFactory
 import com.codepotro.borno.feature.ime.action.ActionKeyResolver
+import com.codepotro.borno.feature.ime.action.AutoSpaceUtils
 import com.codepotro.borno.feature.ime.action.ActionKeyVisual
 import com.codepotro.borno.feature.ime.action.CapsModeUtils
 import com.codepotro.borno.feature.ime.action.InputModeResolver
@@ -2673,8 +2674,14 @@ class KiebordService : InputMethodService() {
             else if (activeLayout.id.startsWith("en")) "en"
             else activeLayout.id.substringBefore('_')
         }
-        val shouldAutoSpace = preferencesState.isAutoSpaceAfterSuggestionEnabled(activeLang)
-        val textToCommit = if (shouldAutoSpace) "$candidateText " else candidateText
+        val prefAutoSpaceEnabled = preferencesState.isAutoSpaceAfterSuggestionEnabled(activeLang)
+        val shouldInsertSpace = AutoSpaceUtils.shouldAutoSpaceAfterSuggestion(
+            isPreferenceEnabled = prefAutoSpaceEnabled,
+            layoutNoAutoSpace = activeLayout.noAutoSpace || primaryAlphaLayout.noAutoSpace,
+            candidateText = candidateText,
+            textAfterCursor = ic.getTextAfterCursor(1, 0)
+        )
+        val textToCommit = if (shouldInsertSpace) "$candidateText " else candidateText
 
         if (EmojiSearchCatalog.isEmoji(candidateText)) {
             val translitMgr = getTransliterationManager()
@@ -2688,7 +2695,7 @@ class KiebordService : InputMethodService() {
             if (shiftState == ShiftState.ONE_SHOT) {
                 shiftState = ShiftState.UNSHIFTED
             }
-            if (shouldAutoSpace) {
+            if (shouldInsertSpace) {
                 lastSpaceTapTime = SystemClock.uptimeMillis()
             }
             updateSuggestions()
@@ -2706,7 +2713,7 @@ class KiebordService : InputMethodService() {
             lastGestureCommittedWord = ""
             isGestureAlternativeActive = false
             ic.commitText(textToCommit, 1)
-            if (shouldAutoSpace) lastSpaceTapTime = SystemClock.uptimeMillis()
+            if (shouldInsertSpace) lastSpaceTapTime = SystemClock.uptimeMillis()
             updateSuggestions()
             return
         }
@@ -2727,13 +2734,13 @@ class KiebordService : InputMethodService() {
             }
         }
         if (translitMgr.isComposing) {
-            if (shouldAutoSpace) {
+            if (prefAutoSpaceEnabled) {
                 translitMgr.commitCustom(textToCommit)
             } else {
                 translitMgr.setCustomComposing(candidateText)
             }
         } else if (composingBuffer.isNotEmpty()) {
-            if (shouldAutoSpace) {
+            if (prefAutoSpaceEnabled) {
                 ic.commitText(textToCommit, 1)
                 composingBuffer.clear()
             } else {
@@ -2742,7 +2749,7 @@ class KiebordService : InputMethodService() {
                 ic.setComposingText(composingBuffer.toString(), 1)
             }
         } else {
-            if (shouldAutoSpace) {
+            if (prefAutoSpaceEnabled) {
                 ic.commitText(textToCommit, 1)
             } else {
                 composingBuffer.clear()
@@ -2753,7 +2760,7 @@ class KiebordService : InputMethodService() {
         if (shiftState == ShiftState.ONE_SHOT) {
             shiftState = ShiftState.UNSHIFTED
         }
-        if (shouldAutoSpace) {
+        if (shouldInsertSpace) {
             lastSpaceTapTime = SystemClock.uptimeMillis()
         }
         updateSuggestions()
@@ -2902,9 +2909,19 @@ class KiebordService : InputMethodService() {
                 if (candidates.isNotEmpty()) {
                     val primary = candidates.first()
                     val primaryText = primary.text.trim()
-                    val shouldAutoSpace = preferencesState.autoSpaceAfterSuggestion
-                    val textToCommit = if (shouldAutoSpace) "$primaryText " else primaryText
+                    val activeLang = activeLayout.language.ifEmpty {
+                        if (activeLayout.id.startsWith("bn")) "bn"
+                        else if (activeLayout.id.startsWith("en")) "en"
+                        else activeLayout.id.substringBefore('_')
+                    }
                     val ic = currentInputConnection
+                    val shouldInsertSpace = AutoSpaceUtils.shouldAutoSpaceAfterSuggestion(
+                        isPreferenceEnabled = preferencesState.isAutoSpaceAfterSuggestionEnabled(activeLang),
+                        layoutNoAutoSpace = activeLayout.noAutoSpace || primaryAlphaLayout.noAutoSpace,
+                        candidateText = primaryText,
+                        textAfterCursor = ic?.getTextAfterCursor(1, 0)
+                    )
+                    val textToCommit = if (shouldInsertSpace) "$primaryText " else primaryText
                     if (canLearnFromCurrentEditor() && preferencesState.learnedWordsEnabled && primaryText.length >= UserDictionaryRepository.MIN_LEARN_LENGTH) {
                         val prevWord = getPrecedingWord()
                         userDictionaryRepo.recordWord(primaryText, prevWord, isGesture = false)
@@ -2913,7 +2930,7 @@ class KiebordService : InputMethodService() {
                     lastGestureCommittedWord = textToCommit
                     isGestureAlternativeActive = true
                     ic?.commitText(textToCommit, 1)
-                    if (shouldAutoSpace) {
+                    if (shouldInsertSpace) {
                         lastSpaceTapTime = SystemClock.uptimeMillis()
                     }
 
